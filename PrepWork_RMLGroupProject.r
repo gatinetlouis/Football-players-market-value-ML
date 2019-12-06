@@ -56,6 +56,16 @@ data <- data %>% rename(`Value (in M€)` = Value,
 
 ### Splitting the Work Rate column into its 2 components (Offensive / Defensive)
 data <- data %>% separate(`Work Rate`, c('Offensive Work Rate', 'Defensive Work Rate'), "/ ")
+data$`Offensive Work Rate` <- factor(data$`Offensive Work Rate`, levels=c("Low", "Medium", 'High'))
+data$`Defensive Work Rate` <- factor(data$`Defensive Work Rate`, levels=c("Low", "Medium", 'High'))
+data$Field_Position <- factor(data$Field_Position, levels=c("Goalkeeper", "Defenser", 'Mitfielder', "Attack"))
+data$`Preferred Foot` <- factor(data$`Preferred Foot`, levels=c("Left", "Right"))
+data$`International Reputation` <- factor(data$`International Reputation`, levels=1:5)
+data$`Weak Foot` <- factor(data$`International Reputation`, levels=1:5)
+data$`Skill Moves` <- factor(data$`International Reputation`, levels=1:5)
+data$Club <- as.factor(data$Club)
+
+summary(data$`International Reputation`)
 
 
 ### Creating a column that captures the remaining duration of the player's contract
@@ -107,20 +117,26 @@ cor(data$`Value (in M€)`, data$`Wage (in K€)`)
 
 ### Plot of the Value vs Remaining Contract Years
 
-ggplot(data3) +
+ggplot(data) +
   aes(x=`Wage (in K€)`, y=`Value (in M€)`, colour=Field_Position) +
   geom_point() +
   geom_smooth(method='lm') +
   scale_x_continuous(limits=c(0,300)) +
   theme_bw()
+  
 
 # As expected, the palyers' market value is positively correlated to the players' wages. 
 # Looking at the different field positions we see that, for a given market value, Defensers get a better wage than Attackers. 
 # This reflects the law of offer and supply: there are more Attackers valued at 30 M€ than Defensers so the latter get better paid.
 
+ggplot(data) +
+  aes(x=`Offensive Work Rate`, y=`Value (in M€)`, fill=`Offensive Work Rate`) +
+  geom_boxplot() +
+  scale_y_log10()
 
-
-
-
-
-
+ggplot(data) +
+  aes(group=Overall, y=`Value (in M€)`, fill=Overall) +
+  geom_boxplot(colour="Black", size=0.3) +
+  scale_fill_gradient(low="White", high="Blue") +
+  scale_x_continuous(limits=c(-0.2,0.4)) +
+  facet_grid(Field_Position~.)
