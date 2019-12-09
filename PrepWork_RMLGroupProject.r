@@ -6,6 +6,8 @@ library(readr)
 library(dplyr)
 library(tidyverse)
 library(ggplot2)
+library(randomForest)
+library(shiny)
 
 data <- read_csv("fifadata.csv")
 
@@ -140,3 +142,63 @@ ggplot(data) +
   scale_fill_gradient(low="White", high="Blue") +
   scale_x_continuous(limits=c(-0.2,0.4)) +
   facet_grid(Field_Position~.)
+
+#Adding teams and leagues to database:
+
+topclub<-data %>% group_by(Club) %>% summarize(count=n(), Val=sum(`Value (in M€)`),) %>% arrange(desc(Val)) #TopClub by nb of player and Value in M€
+
+teams<-read.csv("teams.csv")
+league<-read.csv("leagues.csv")
+league$LeagueCode<-League$Code
+teams2<-merge(teams, league, by="LeagueCode", all= F)
+teams2$Club<-teams2$Name.x
+test<-merge(data, teams2, by="Club", all= T)
+
+######
+
+#Regression models : predict Value with inputs
+
+#1 Linear regression (full)
+
+datareg <- data %>% select(-ID, -Name, -Nationality, -Club)
+
+#We do a 10-folds cross validation
+set.seed(12345)
+
+n=nrow(data)
+MSE=rep(NA,20)
+MAPE=rep(NA,20)
+for (i in 1:20){
+  train_index=sample(1:n,round(0.7*n))
+  train=datareg[train_index,]
+  test=datareg[-train_index,]
+  linear_model <- lm(Value (in M€)~., data=train)
+  pred_lm=predict(linear_model,newdata=test)
+  MSE[i]=mean((test$`Value (in M€)`-pred_lm)^2)
+  MAPE[i]=mean(abs((test$`Value (in M€)`-pred_lm)/(test$`Value (in M€)`)))
+  
+}
+
+MSE_lm=mean(MSE)
+MAPE_lm=mean(MAPE)
+
+print(MSE_lm);print(MAPE_lm)
+
+#2. Trees and Random forests
+
+n<-nrow(data)
+set.seed(12345)
+train_index=sample(1:n,round(0.7*n))
+train=datareg[train_index,]
+test=datareg[-train_index,]
+
+tree<-rpart("Value (in M€)"~., data=train, cp=0.000000001)
+printcp(tree) 
+plotcp(tree)
+alpha.opt<-tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"]
+besttree<-prune(tree, cp=alpha.opt)
+pred<-predict(besttree, newdata=test)
+mean((data$"Value (in M€)"-pred)^2) #quadratic err
+
+visTree(besttree)
+
