@@ -5,8 +5,8 @@ output: html_notebook
 ---
 
 ```{r, echo=FALSE, eval=TRUE}
-getwd()
-setwd("/Users/antoinepiguet/Desktop/EDHEC DAAI/Introduction to Machine Learning")
+my_dir=getwd()
+setwd(my_dir)
 ```
 
 ```{r, echo=FALSE, eval=TRUE}
@@ -24,11 +24,24 @@ data <- read_csv("fifadata.csv") #is it possible to use a link here to make it r
 
 data_test <- read_csv("fifadata.csv")
 ```
-***
+
 # I-Data cleaning using dplyr:
 
 ```{r, eval=TRUE}
-data <- data %>% select(-Photo, -Flag, -`Club Logo`, -(LS:RB), -Joined, -`Loaned From`, -X1, -Special, -`Real Face`, -`Body Type`, -`Jersey Number`)
+library(qdapRegex)
+num_club=as.numeric(ex_between(data$`Club Logo`, "light/", ".png"))
+data$num_club=num_club
+
+club_table=read_csv('club.csv')
+group_club=club_table%>%group_by(url)%>%summarize(league_name=first(league_name))
+data=left_join(data,group_club,by=c('num_club'='url'))
+#We have joined the full data
+```
+
+
+```{r, eval=TRUE}
+data <- data %>% select(-Photo, -Flag, -(LS:RB), -Joined, -`Loaned From`, -X1, -Special, -`Real Face`, -`Body Type`, -`Jersey Number`,-`Club Logo`,-num_club)
+
 ```
 Removing the Photo, Flag, Club Logo, Loaned From columns // We removed scores of each players for each position on the field
 Body Type removed because of high correlation with Height and Weight
@@ -68,6 +81,18 @@ data <- data %>% rename(`Value (in M€)` = Value,
                         `Height (in cm)` = Height)
 ```
 
+Create categories for field positions
+
+```{r}
+for (i in 1:nrow(data)) {
+  if (data$Position[i] %in% c("LW", "LF", "RW", "RF", 'CF', 'LS', 'RS', 'ST')) data$Field_Position[i] <- "Attack"
+  if (data$Position[i] %in% c('CDM', 'LDM', 'RDM', 'CM', 'LCM', 'RCM', 'CAM', 'LAM', 'RAM', 'LM', 'RM')) data$Field_Position[i] <- "Mitfielder"
+  if (data$Position[i] %in% c('CB', 'LCB', 'RCB', 'LB', 'RB', 'LWB', 'RWB')) data$Field_Position[i] <- "Defenser"
+  if (data$Position[i] %in% c("GK")) data$Field_Position[i] <- "Goalkeeper"
+}
+
+```
+
 #### Splitting the Work Rate column into its 2 components (Offensive / Defensive)
 ```{r}
 data <- data %>% separate(`Work Rate`, c('Offensive Work Rate', 'Defensive Work Rate'), "/ ")
@@ -99,20 +124,9 @@ for (i in 1:nrow(data)) {
 
 data$`Remaining Contract Duration` <- as.numeric(data$`Contract Valid Until`) - 2018
 
-data <- data %>% select(-`Contract Valid Until`)
+data <- data %>% select(-`Contract Valid Until`,-Position)
 ```
 
-
-```{r}
-for (i in 1:nrow(data)) {
-  if (data$Position[i] %in% c("LW", "LF", "RW", "RF", 'CF', 'LS', 'RS', 'ST')) data$Field_Position[i] <- "Attack"
-  if (data$Position[i] %in% c('CDM', 'LDM', 'RDM', 'CM', 'LCM', 'RCM', 'CAM', 'LAM', 'RAM', 'LM', 'RM')) data$Field_Position[i] <- "Mitfielder"
-  if (data$Position[i] %in% c('CB', 'LCB', 'RCB', 'LB', 'RB', 'LWB', 'RWB')) data$Field_Position[i] <- "Defenser"
-  if (data$Position[i] %in% c("GK")) data$Field_Position[i] <- "Goalkeeper"
-}
-
-data <- data %>% select(-Position)
-```
 
 ```{r}
 df <- data[which(apply(is.na(data),1,any)),]
@@ -124,8 +138,35 @@ nad 300 other players for whom FIFA did not gather the information or was denied
 
 ```{r}
 data <- na.omit(data)
+
 ```
-***
+
+How to categorise league names?
+
+```{r}
+
+data$league_name=as.factor(data$league_name)
+levels(data$league_name)
+
+df_league=data%>%group_by(league_name)%>%summarise(value=mean(`Value (in M€)`))%>%arrange(desc(value))
+#We take the average value of a player per league
+#We see that there are errors on RDM leagues
+```
+
+See number of clubs per leagues : 
+
+```{r, eval=TRUE}
+data%>%filter(league_name=='Rep. Ireland Airtricity League')%>%group_by(Club)%>%summarise(count=n()) #ok with wiki
+data%>%filter(league_name=='Ukrainian Premier League')%>%group_by(Club)%>%summarise(count=n()) #only 2 : confirms hypothesis
+
+
+```
+
+Pigzer action : virer les clubs où il y a championnats pétés et créer des catégories
+
+
+
+
 # II-Data Exploration using dplyr & ggplot
 
 ```{r}
