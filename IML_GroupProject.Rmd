@@ -1,7 +1,9 @@
 ---
 title: "Introduction to Machine Learning - FIFA Case"
 author: "A. Piguet - L. Gatinet - J. Guillot"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r, echo=FALSE, eval=TRUE}
@@ -29,12 +31,24 @@ data_test <- read_csv("fifadata.csv")
 
 ```{r, eval=TRUE}
 library(qdapRegex)
-num_club=as.numeric(ex_between(data$`Club Logo`, "light/", ".png"))
-data$num_club=num_club
+num_club = as.numeric(ex_between(data$`Club Logo`, "light/", ".png"))
+data$num_club = num_club
 
-club_table=read_csv('club.csv')
-group_club=club_table%>%group_by(url)%>%summarize(league_name=first(league_name))
-data=left_join(data,group_club,by=c('num_club'='url'))
+`%nin%` = Negate(`%in%`) # creating a 'not in' operator for convenience
+club_table = read_csv('club.csv')
+
+# To further use the 'Championship' variable in a relevant manner, we decided to remove championships for which some clubs are missing (namely championships FIFA 19 did not get the right to refer to)
+clean_club_table = club_table %>% filter(league_name %nin% c("South African Premier Division",
+                                                        "Finnish Veikkausliiga",
+                                                        "Greek Super League",
+                                                        "Russian Premier League",
+                                                        "Croatian Prva HNL",
+                                                        "Czech Republic Gambrinus Liga",
+                                                        "Ukrainian Premier League"))
+
+
+group_club = clean_club_table %>% group_by(url) %>% summarize(league_name=first(league_name))
+data = left_join(data,group_club,by=c('num_club'='url'))
 #We have joined the full data
 ```
 
