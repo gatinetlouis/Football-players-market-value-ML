@@ -1,5 +1,5 @@
 ---
-title: "Introduction to Machine Learning - FIFA Case"
+title: "Introduction to Machine Learning - FIFA 2019 Case"
 author: "A. Piguet - L. Gatinet - J. Guillot"
 output:
   html_document:
@@ -7,7 +7,7 @@ output:
 ---
 
 ```{r, echo=FALSE, eval=TRUE}
-my_dir=getwd()
+my_dir = getwd()
 setwd(my_dir)
 ```
 
@@ -22,9 +22,9 @@ library(shiny)
 ```
 
 ```{r, eval=TRUE}
-data <- read_csv("fifadata.csv") #is it possible to use a link here to make it really easy to read in the end ?
+data = read_csv("fifadata.csv") #is it possible to use a link here to make it really easy to read in the end ?
 
-data_test <- read_csv("fifadata.csv")
+data_test = read_csv("fifadata.csv")
 ```
 
 # I-Data cleaning using dplyr:
@@ -54,7 +54,8 @@ data = left_join(data,group_club,by=c('num_club'='url'))
 
 
 ```{r, eval=TRUE}
-data <- data %>% select(-Photo, -Flag, -(LS:RB), -Joined, -`Loaned From`, -X1, -Special, -`Real Face`, -`Body Type`, -`Jersey Number`,-`Club Logo`,-num_club)
+data = data %>% 
+  select(-Photo, -Flag, -(LS:RB), -Joined, -`Loaned From`, -X1, -Special, -`Real Face`, -`Body Type`, -`Jersey Number`,-`Club Logo`,-num_club)
 
 ```
 Removing the Photo, Flag, Club Logo, Loaned From columns // We removed scores of each players for each position on the field
@@ -63,8 +64,8 @@ Body Type removed because of high correlation with Height and Weight
 
 #### Converting arrival date in R format
 ```{r, eval=TRUE}
-#data[which(is.na(data[,"Joined"])),"Joined"] <- "Loaned" # C'est tout casse
-#data$Joined <- strptime(data$Joined, format="%b %d, %Y")
+#data[which(is.na(data[,"Joined"])),"Joined"] = "Loaned" # C'est tout casse
+#data$Joined = strptime(data$Joined, format="%b %d, %Y")
 ```
 
 Replacing the NA's in the Joined column by the string "Loaned"
@@ -72,23 +73,28 @@ Replacing the NA's in the Joined column by the string "Loaned"
 
 #### Converting financial values as integers (Wage, Release Clause and Value)
 ```{r}
-data$Value <- ifelse(substring(data$Value, nchar(data$Value)) == "M",
+data$Value = ifelse(substring(data$Value, nchar(data$Value)) == "M",
                      as.numeric(substring(data$Value,2,nchar(data$Value)-1)),
                      as.numeric(substring(data$Value,2,nchar(data$Value)-1)) / 1000)
-data$Wage <- as.numeric(substring(data$Wage,2,nchar(data$Wage)-1))
-data$`Release Clause` <- as.numeric(substring(data$`Release Clause`,2,nchar(data$`Release Clause`)-1))
+
+data$Wage = as.numeric(substring(data$Wage,2,nchar(data$Wage)-1))
+
+data$`Release Clause` = as.numeric(substring(data$`Release Clause`,2,nchar(data$`Release Clause`)-1))
 ```
 
 #### Converting measures of height and weight into international metric system
 ```{r}
-data$Weight <- as.numeric(substring(data$Weight, 1, 3)) * 0.45359237
-data <- data %>% separate(Height, c('feet', 'inches'), "'", convert = TRUE) %>%
-  mutate(Height = (12*feet + inches)*2.54) %>% select(-inches, -feet)
+data$Weight = as.numeric(substring(data$Weight, 1, 3)) * 0.45359237
+
+data = data %>% 
+  separate(Height, c('feet', 'inches'), "'", convert = TRUE) %>%
+  mutate(Height = (12*feet + inches)*2.54) %>% 
+  select(-inches, -feet)
 ```
 
 #### Renaming all modified variables
 ```{r}
-data <- data %>% rename(`Value (in M€)` = Value,
+data = data %>% rename(`Value (in M€)` = Value,
                         `Wage (in K€)` = Wage,
                         `Release Clause (in M€)` = `Release Clause`,
                         `Weight (in kg)` = Weight,
@@ -109,41 +115,47 @@ for (i in 1:nrow(data)) {
 
 #### Splitting the Work Rate column into its 2 components (Offensive / Defensive)
 ```{r}
-data <- data %>% separate(`Work Rate`, c('Offensive Work Rate', 'Defensive Work Rate'), "/ ")
-data$`Offensive Work Rate` <- factor(data$`Offensive Work Rate`, levels=c("Low", "Medium", 'High'))
-data$`Defensive Work Rate` <- factor(data$`Defensive Work Rate`, levels=c("Low", "Medium", 'High'))
-data$Field_Position <- factor(data$Field_Position, levels=c("Goalkeeper", "Defenser", 'Mitfielder', "Attack"))
-data$`Preferred Foot` <- factor(data$`Preferred Foot`, levels=c("Left", "Right"))
-data$`International Reputation` <- factor(data$`International Reputation`, levels=1:5)
-data$`Weak Foot` <- factor(data$`International Reputation`, levels=1:5)
-data$`Skill Moves` <- factor(data$`International Reputation`, levels=1:5)
-data$Club <- as.factor(data$Club)
+data = data %>% separate(`Work Rate`, c('Offensive Work Rate', 'Defensive Work Rate'), "/ ")
+data$`Offensive Work Rate` = factor(data$`Offensive Work Rate`, 
+                                    levels=c("Low", "Medium", 'High'))
+data$`Defensive Work Rate` = factor(data$`Defensive Work Rate`, 
+                                    levels=c("Low", "Medium", 'High'))
 
-summary(data$`International Reputation`)
+data$Field_Position = factor(data$Field_Position, 
+                             levels=c("Goalkeeper", "Defenser", 'Mitfielder', "Attack"))
+data$`Preferred Foot` = factor(data$`Preferred Foot`, 
+                               levels=c("Left", "Right"))
+data$`International Reputation` = factor(data$`International Reputation`, 
+                                         levels=1:5)
+data$`Weak Foot` = factor(data$`International Reputation`, 
+                          levels=1:5)
+data$`Skill Moves` = factor(data$`International Reputation`, 
+                            levels=1:5)
+data$Club <- as.factor(data$Club)
 ```
 
 #### Creating a column that captures the remaining duration of the player's contract
 
 ```{r}
-text <- NULL
-first <- NULL
-last <- NULL
+text = NULL
+first = NULL
+last = NULL
 
 for (i in 1:nrow(data)) {
-  text[i]=data$`Contract Valid Until`[i] 
-  first[i]=nchar(text[i])-4
-  last[i]=nchar(text[i])
-  data$`Contract Valid Until`[i]=substring(text[i],first[i],last[i])
+  text[i] = data$`Contract Valid Until`[i] 
+  first[i] = nchar(text[i])-4
+  last[i] = nchar(text[i])
+  data$`Contract Valid Until`[i] = substring(text[i],first[i],last[i])
 }
 
-data$`Remaining Contract Duration` <- as.numeric(data$`Contract Valid Until`) - 2018
+data$`Remaining Contract Duration` = as.numeric(data$`Contract Valid Until`) - 2018
 
-data <- data %>% select(-`Contract Valid Until`,-Position)
+data <- data %>% select(-`Contract Valid Until`, -Position)
 ```
 
 
 ```{r}
-df <- data[which(apply(is.na(data),1,any)),]
+df = data[which(apply(is.na(data),1,any)),]
 ```
 
 All remaining NA's are players who have been loaned to another team (1264 players) 
@@ -151,35 +163,24 @@ All remaining NA's are players who have been loaned to another team (1264 player
 nad 300 other players for whom FIFA did not gather the information or was denied the access
 
 ```{r}
-data <- na.omit(data)
+data = na.omit(data)
 
 ```
 
 How to categorise league names?
 
 ```{r}
+df_league = data %>% 
+  group_by(league_name) %>% 
+  summarise(value=mean(`Value (in M€)`)) %>% 
+  arrange(desc(value))
 
-data$league_name=as.factor(data$league_name)
-levels(data$league_name)
+#Looking at the ranking of our leagues, we remark a gap in average player tranfer value between the 6th championship (the Portuguese one) and those following. For visualization purposes and as these first 6 championships are the most known ones, we decide to keep them and aggregate the others in under an "Other" category.
 
-df_league=data%>%group_by(league_name)%>%summarise(value=mean(`Value (in M€)`))%>%arrange(desc(value))
-#We take the average value of a player per league
-#We see that there are errors on RDM leagues
+df_league_others = df_league %>% slice(7:nrow(df_league))
+
+data[data$league_name %in% df_league_others$league_name, "league_name"] = "Others"
 ```
-
-See number of clubs per leagues : 
-
-```{r, eval=TRUE}
-data%>%filter(league_name=='Rep. Ireland Airtricity League')%>%group_by(Club)%>%summarise(count=n()) #ok with wiki
-data%>%filter(league_name=='Ukrainian Premier League')%>%group_by(Club)%>%summarise(count=n()) #only 2 : confirms hypothesis
-
-
-```
-
-Pigzer action : virer les clubs où il y a championnats pétés et créer des catégories
-
-
-
 
 # II-Data Exploration using dplyr & ggplot
 
@@ -206,14 +207,15 @@ ggplot(data) +
   theme_bw()
 ```
 
-As expected, the palyers' market value is positively correlated to the players' wages. Looking at the different field positions we see that, for a given market value, Defensers get a better wage than Attackers. This reflects the law of offer and supply: there are more Attackers valued at 30 M€ than Defensers so the latter get better paid.
+As expected, the players' market value is positively correlated to the players' wages. Looking at the different field positions we see that, for a given market value, Defensers get a better wage than Attackers. This reflects the law of offer and supply: there are more Attackers valued at 30 M€ than Defensers so the latter get better paid.
 
 #### Plot
 ```{r}
 ggplot(data) +
   aes(x=`Offensive Work Rate`, y=`Value (in M€)`, fill=`Offensive Work Rate`) +
   geom_boxplot() +
-  scale_y_log10()
+  scale_y_log10() +
+  facet_grid()
 ```
 
 
@@ -227,21 +229,9 @@ ggplot(data) +
   facet_grid(Field_Position~.)
 ```
 
-#### Adding teams and leagues to database:
-```{r}
-topclub<-data %>% group_by(Club) %>% summarize(count=n(), Val=sum(`Value (in M€)`),) %>% arrange(desc(Val)) #TopClub by nb of player and Value in M€
-
-teams<-read.csv("teams.csv")
-league<-read.csv("leagues.csv")
-league$LeagueCode<-League$Code
-teams2<-merge(teams, league, by="LeagueCode", all= F)
-teams2$Club<-teams2$Name.x
-test<-merge(data, teams2, by="Club", all= T)
-```
-
 ***
 
-# III-Regression models : predict Value with inputs
+# III-Regression models : Predict Value with inputs
 
 #### 1. Linear regression (full)
 ```{r}
