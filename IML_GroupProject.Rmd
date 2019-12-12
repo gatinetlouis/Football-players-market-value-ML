@@ -49,6 +49,7 @@ clean_club_table = club_table %>% filter(league_name %nin% c("South African Prem
 
 group_club = clean_club_table %>% group_by(url) %>% summarize(league_name=first(league_name))
 data = left_join(data,group_club,by=c('num_club'='url'))
+
 #We have joined the full data
 ```
 
@@ -104,6 +105,7 @@ data = data %>% rename(`Value (in M€)` = Value,
 Create categories for field positions
 
 ```{r}
+data$Field_Position = rep(0,nrow(data))
 for (i in 1:nrow(data)) {
   if (data$Position[i] %in% c("LW", "LF", "RW", "RF", 'CF', 'LS', 'RS', 'ST')) data$Field_Position[i] <- "Attack"
   if (data$Position[i] %in% c('CDM', 'LDM', 'RDM', 'CM', 'LCM', 'RCM', 'CAM', 'LAM', 'RAM', 'LM', 'RM')) data$Field_Position[i] <- "Mitfielder"
@@ -137,9 +139,7 @@ data$Club <- as.factor(data$Club)
 #### Creating a column that captures the remaining duration of the player's contract
 
 ```{r}
-text = NULL
-first = NULL
-last = NULL
+text = NULL; first = NULL; last = NULL
 
 for (i in 1:nrow(data)) {
   text[i] = data$`Contract Valid Until`[i] 
@@ -214,8 +214,7 @@ As expected, the players' market value is positively correlated to the players' 
 ggplot(data) +
   aes(x=`Offensive Work Rate`, y=`Value (in M€)`, fill=`Offensive Work Rate`) +
   geom_boxplot() +
-  scale_y_log10() +
-  facet_grid()
+  scale_y_log10()
 ```
 
 
@@ -227,6 +226,23 @@ ggplot(data) +
   scale_fill_gradient(low="White", high="Blue") +
   scale_x_continuous(limits=c(-0.2,0.4)) +
   facet_grid(Field_Position~.)
+```
+
+
+#### Plot
+```{r}
+dfgraph <- data %>% 
+  group_by(Age) %>% 
+  summarize(Generation=n()) %>% 
+  mutate(GenPerc = Generation/sum(Generation)) %>% 
+  right_join(data, by="Age")
+
+ggplot(dfgraph) +
+  aes(x=Age, y=`Value (in M€)`, fill=GenPerc) +
+  geom_boxplot(aes(group=Age), alpha=0.5, size=0.3) +
+  scale_y_log10() +
+  scale_fill_gradient(low="yellow", high="red") +
+  theme_bw()
 ```
 
 ***
