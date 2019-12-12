@@ -245,6 +245,20 @@ ggplot(dfgraph) +
   theme_bw()
 ```
 
+#### Plot
+```{r}
+ggplot(data) + 
+  aes(x=Age, y=Overall, colour=log(`Value (in M€)`)) +
+  geom_point(stroke=F, alpha=0.7) +
+  geom_hline(yintercept = median(data$Overall), lty=2, alpha=0.5) +
+  geom_vline(xintercept = median(data$Age), lty=2, alpha=0.5) +
+  geom_smooth(method="lm", size=0.3, se=F, colour="royalblue") +
+  theme_bw() +
+  scale_color_continuous("Log of Players' value", low="grey", high="gold") +
+  scale_x_continuous(limits=c(16, 40))
+```
+
+
 ***
 
 # III-Regression models : Predict Value with inputs
