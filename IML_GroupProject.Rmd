@@ -1,9 +1,7 @@
 ---
 title: "Introduction to Machine Learning - FIFA 2019 Case"
 author: "A. Piguet - L. Gatinet - J. Guillot"
-output:
-  html_document:
-    df_print: paged
+output: html_document
 ---
 
 ```{r, echo=FALSE, eval=TRUE}
@@ -23,12 +21,41 @@ library(shiny)
 ```
 
 ```{r, eval=TRUE}
-data = read_csv("fifadata.csv") #is it possible to use a link here to make it really easy to read in the end ?
-
-data_test = read_csv("fifadata.csv")
+data = read_csv("fifadata.csv")
 ```
 
 # I-Data cleaning using dplyr:
+
+To further use the 'Championship' variable in a relevant manner, we decided to remove championships for which some clubs are missing (namely championships FIFA 19 did not get the right to refer to) RAJOUTER SOURCE WIKI
+
+
+#### Converting financial values as integers (Wage, Release Clause and Value) + Wage/Height
+```{r}
+data$Value = ifelse(substring(data$Value, 
+                              nchar(data$Value)) == "M",
+                              as.numeric(substring(data$Value,2,nchar(data$Value)-1)),
+                              as.numeric(substring(data$Value,2,nchar(data$Value)-1)) / 1000)
+
+data$Wage = as.numeric(substring(data$Wage,2,nchar(data$Wage)-1))
+
+data$`Release Clause` = as.numeric(substring(data$`Release Clause`,2,nchar(data$`Release Clause`)-1))
+
+
+
+data$Weight = as.numeric(substring(data$Weight, 1, 3)) * 0.45359237
+
+data = data %>% 
+  separate(Height, c('feet', 'inches'), "'", convert = TRUE) %>%
+  mutate(Height = (12*feet + inches)*2.54) %>% 
+  select(-inches, -feet)
+
+data = data %>% rename(`Value (in M€)` = Value,
+                        `Wage (in K€)` = Wage,
+                        `Release Clause (in M€)` = `Release Clause`,
+                        `Weight (in kg)` = Weight,
+                        `Height (in cm)` = Height)
+```
+
 
 ```{r, eval=TRUE}
 library(qdapRegex)
@@ -37,8 +64,6 @@ data$num_club = num_club
 
 `%nin%` = Negate(`%in%`) # creating a 'not in' operator for convenience
 club_table = read_csv('club.csv')
-
-# To further use the 'Championship' variable in a relevant manner, we decided to remove championships for which some clubs are missing (namely championships FIFA 19 did not get the right to refer to)
 clean_club_table = club_table %>% filter(league_name %nin% c("South African Premier Division",
                                                         "Finnish Veikkausliiga",
                                                         "Greek Super League",
@@ -47,60 +72,33 @@ clean_club_table = club_table %>% filter(league_name %nin% c("South African Prem
                                                         "Czech Republic Gambrinus Liga",
                                                         "Ukrainian Premier League"))
 
-
 group_club = clean_club_table %>% group_by(url) %>% summarize(league_name=first(league_name))
 data = left_join(data,group_club,by=c('num_club'='url'))
 
-#We have joined the full data
+df_league = data %>% 
+  group_by(league_name) %>% 
+  summarise(value=mean(`Value (in M€)`)) %>% 
+  arrange(desc(value))
+#Looking at the ranking of our leagues, we remark a gap in average player tranfer value between the 6th championship (the Portuguese one) and those following. For visualization purposes and as these first 6 championships are the most known ones, we decide to keep them and aggregate the others in under an "Other" category.
+df_league_others = df_league %>% slice(7:nrow(df_league))
+data[data$league_name %in% df_league_others$league_name, "league_name"] = "Others"
 ```
 
-
-```{r, eval=TRUE}
-data = data %>% 
-  select(-Photo, -Flag, -(LS:RB), -Joined, -`Loaned From`, -X1, -Special, -`Real Face`, -`Body Type`, -`Jersey Number`,-`Club Logo`,-num_club)
-
-```
 Removing the Photo, Flag, Club Logo, Loaned From columns // We removed scores of each players for each position on the field
 Body Type removed because of high correlation with Height and Weight
-
-
-#### Converting arrival date in R format
 ```{r, eval=TRUE}
-#data[which(is.na(data[,"Joined"])),"Joined"] = "Loaned" # C'est tout casse
-#data$Joined = strptime(data$Joined, format="%b %d, %Y")
-```
-
-Replacing the NA's in the Joined column by the string "Loaned"
-
-
-#### Converting financial values as integers (Wage, Release Clause and Value)
-```{r}
-data$Value = ifelse(substring(data$Value, nchar(data$Value)) == "M",
-                     as.numeric(substring(data$Value,2,nchar(data$Value)-1)),
-                     as.numeric(substring(data$Value,2,nchar(data$Value)-1)) / 1000)
-
-data$Wage = as.numeric(substring(data$Wage,2,nchar(data$Wage)-1))
-
-data$`Release Clause` = as.numeric(substring(data$`Release Clause`,2,nchar(data$`Release Clause`)-1))
-```
-
-#### Converting measures of height and weight into international metric system
-```{r}
-data$Weight = as.numeric(substring(data$Weight, 1, 3)) * 0.45359237
-
-data = data %>% 
-  separate(Height, c('feet', 'inches'), "'", convert = TRUE) %>%
-  mutate(Height = (12*feet + inches)*2.54) %>% 
-  select(-inches, -feet)
-```
-
-#### Renaming all modified variables
-```{r}
-data = data %>% rename(`Value (in M€)` = Value,
-                        `Wage (in K€)` = Wage,
-                        `Release Clause (in M€)` = `Release Clause`,
-                        `Weight (in kg)` = Weight,
-                        `Height (in cm)` = Height)
+data = data %>% select(-Photo, 
+                       -Flag, 
+                       -(LS:RB), 
+                       -Joined, 
+                       -`Loaned From`, 
+                       -X1, 
+                       -Special, 
+                       -`Real Face`, 
+                       -`Body Type`, 
+                       -`Jersey Number`,
+                       -`Club Logo`,
+                       -num_club)
 ```
 
 Create categories for field positions
@@ -108,31 +106,30 @@ Create categories for field positions
 ```{r}
 data$Field_Position = rep(0,nrow(data))
 for (i in 1:nrow(data)) {
-  if (data$Position[i] %in% c("LW", "LF", "RW", "RF", 'CF', 'LS', 'RS', 'ST')) data$Field_Position[i] <- "Attack"
-  if (data$Position[i] %in% c('CDM', 'LDM', 'RDM', 'CM', 'LCM', 'RCM', 'CAM', 'LAM', 'RAM', 'LM', 'RM')) data$Field_Position[i] <- "Mitfielder"
-  if (data$Position[i] %in% c('CB', 'LCB', 'RCB', 'LB', 'RB', 'LWB', 'RWB')) data$Field_Position[i] <- "Defenser"
-  if (data$Position[i] %in% c("GK")) data$Field_Position[i] <- "Goalkeeper"
+  if (data$Position[i] %in% c("LW", "LF", "RW", "RF", 'CF', 'LS', 'RS', 'ST')) data$Field_Position[i] = "Attack"
+  if (data$Position[i] %in% c('CDM', 'LDM', 'RDM', 'CM', 'LCM', 'RCM', 'CAM', 'LAM', 'RAM', 'LM', 'RM')) data$Field_Position[i] = "Mitfielder"
+  if (data$Position[i] %in% c('CB', 'LCB', 'RCB', 'LB', 'RB', 'LWB', 'RWB')) data$Field_Position[i] = "Defenser"
+  if (data$Position[i] %in% c("GK")) data$Field_Position[i] = "Goalkeeper"
 }
-
 ```
 
 #### Splitting the Work Rate column into its 2 components (Offensive / Defensive)
 ```{r}
 data = data %>% separate(`Work Rate`, c('Offensive Work Rate', 'Defensive Work Rate'), "/ ")
+
 data$`Offensive Work Rate` = factor(data$`Offensive Work Rate`, 
                                     levels=c("Low", "Medium", 'High'))
 data$`Defensive Work Rate` = factor(data$`Defensive Work Rate`, 
                                     levels=c("Low", "Medium", 'High'))
-
 data$Field_Position = factor(data$Field_Position, 
                              levels=c("Goalkeeper", "Defenser", 'Mitfielder', "Attack"))
 data$`Preferred Foot` = factor(data$`Preferred Foot`, 
                                levels=c("Left", "Right"))
 data$`International Reputation` = factor(data$`International Reputation`, 
                                          levels=1:5)
-data$`Weak Foot` = factor(data$`International Reputation`, 
+data$`Weak Foot` = factor(data$`Weak Foot`, 
                           levels=1:5)
-data$`Skill Moves` = factor(data$`International Reputation`, 
+data$`Skill Moves` = factor(data$`Skill Moves`, 
                             levels=1:5)
 data$Club <- as.factor(data$Club)
 ```
@@ -141,22 +138,20 @@ data$Club <- as.factor(data$Club)
 
 ```{r}
 text = NULL; first = NULL; last = NULL
-
 for (i in 1:nrow(data)) {
   text[i] = data$`Contract Valid Until`[i] 
   first[i] = nchar(text[i])-4
   last[i] = nchar(text[i])
   data$`Contract Valid Until`[i] = substring(text[i],first[i],last[i])
 }
-
 data$`Remaining Contract Duration` = as.numeric(data$`Contract Valid Until`) - 2018
-
 data <- data %>% select(-`Contract Valid Until`, -Position)
 ```
 
 
 ```{r}
 df = data[which(apply(is.na(data),1,any)),]
+head(df)
 ```
 
 All remaining NA's are players who have been loaned to another team (1264 players) 
@@ -167,44 +162,26 @@ nad 300 other players for whom FIFA did not gather the information or was denied
 data = na.omit(data)
 ```
 
-How to categorise league names?
-
-```{r}
-df_league = data %>% 
-  group_by(league_name) %>% 
-  summarise(value=mean(`Value (in M€)`)) %>% 
-  arrange(desc(value))
-
-#Looking at the ranking of our leagues, we remark a gap in average player tranfer value between the 6th championship (the Portuguese one) and those following. For visualization purposes and as these first 6 championships are the most known ones, we decide to keep them and aggregate the others in under an "Other" category.
-
-df_league_others = df_league %>% slice(7:nrow(df_league))
-
-data[data$league_name %in% df_league_others$league_name, "league_name"] = "Others"
-```
-
 # II-Data Exploration using dplyr & ggplot
 
 ```{r}
-ggplot(data) + aes(x=`Wage (in K€)`) + geom_histogram(bins=30) + scale_x_log10()
-```
-
-```{r}
-datareg <- data %>% select(-ID, -Name, -Nationality, -Club) # Removing irrelevant categorical variables for the regression
-my.model <- lm(`Value (in M€)`~., data=datareg)
-summary(my.model)
-
-cor(data$`Value (in M€)`, data$`Wage (in K€)`)
-# Removing outliers regarding the transfer value from the dataset allows to decrease the variance
+ggplot(data) + 
+  aes(x=`Value (in M€)`) + 
+  geom_histogram(bins=30) + 
+  scale_x_log10() +
+  theme_bw()
 ```
 
 #### Plot of the Value vs Remaining Contract Years
 ```{r}
 ggplot(data) +
   aes(x=`Wage (in K€)`, y=`Value (in M€)`, colour=Field_Position) +
-  geom_point() +
+  geom_point(stroke=F) +
   geom_smooth(method='lm') +
   scale_x_continuous(limits=c(0,300)) +
-  theme_bw()
+  scale_color_discrete("Field Position") +
+  theme_bw() +
+  theme(axis.title=element_text(face="bold"))
 ```
 
 As expected, the players' market value is positively correlated to the players' wages. Looking at the different field positions we see that, for a given market value, Defensers get a better wage than Attackers. This reflects the law of offer and supply: there are more Attackers valued at 30 M€ than Defensers so the latter get better paid.
@@ -213,8 +190,9 @@ As expected, the players' market value is positively correlated to the players' 
 ```{r}
 ggplot(data) +
   aes(x=`Offensive Work Rate`, y=`Value (in M€)`, fill=`Offensive Work Rate`) +
-  geom_boxplot() +
-  scale_y_log10()
+  geom_boxplot(show.legend = F) +
+  scale_y_log10() +
+  theme_bw()
 ```
 
 
@@ -223,9 +201,10 @@ ggplot(data) +
 ggplot(data) +
   aes(group=Overall, y=`Value (in M€)`, fill=Overall) +
   geom_boxplot(colour="Black", size=0.3) +
-  scale_fill_gradient(low="White", high="Blue") +
-  scale_x_continuous(limits=c(-0.2,0.4)) +
-  facet_grid(Field_Position~.)
+  scale_fill_gradient2(low="Red", mid="Red", high="Blue", midpoint=75) +
+  scale_x_continuous(limits=c(0.1,0.4)) +
+  facet_grid(Field_Position~.) +
+  theme(legend.position = "bottom")
 ```
 
 
@@ -240,9 +219,12 @@ dfgraph <- data %>%
 ggplot(dfgraph) +
   aes(x=Age, y=`Value (in M€)`, fill=GenPerc) +
   geom_boxplot(aes(group=Age), alpha=0.5, size=0.3) +
+  scale_x_continuous(limits=c(15,42)) +
   scale_y_log10() +
-  scale_fill_gradient(low="yellow", high="red") +
-  theme_bw()
+  scale_fill_gradient("% of Tot. Population", low="yellow", high="red") +
+  theme_bw()+
+  theme(legend.position = "bottom",
+        legend.title = element_text(face="bold"))
 ```
 
 #### Plot
@@ -260,7 +242,6 @@ plot_central = ggplot(data) +
                   theme(legend.position="bottom", legend.title = element_text(size=10),
                         axis.title.x = element_text(face="bold"),
                         axis.title.y = element_text(face="bold"))
-
 ggMarginal(plot_central, type="boxplot", col="darkblue")
 ```
 
@@ -269,49 +250,68 @@ ggMarginal(plot_central, type="boxplot", col="darkblue")
 
 # III-Regression models : Predict Value with inputs
 
-#### 1. Linear regression (full)
+#### 1. Linear regression (full°
+
 ```{r}
 datareg <- data %>% select(-ID, -Name, -Nationality, -Club)
-
+#EXPLAIN MORE WHY WE DELETE THESE VARIABLES (corr, dummies, pas besoin koi)
 #We do a 10-folds cross validation
 set.seed(12345)
+MSE = rep(NA,20)
+MAPE = rep(NA,20)
+#Warning message on Position
+```
 
-n=nrow(data)
-MSE=rep(NA,20)
-MAPE=rep(NA,20)
+```{r}
+library(caret)
+folds <- createFolds(1:nrow(datareg),k=20)
+```
+
+```{r}
 for (i in 1:20){
-  train_index=sample(1:n,round(0.7*n))
-  train=datareg[train_index,]
-  test=datareg[-train_index,]
-  linear_model <- lm(Value (in M€)~., data=train)
+  train <- datareg %>% slice(-folds[[i]])
+  test <- datareg %>% slice(folds[[i]])
+  linear_model <- lm(`Value (in M€)`~., data=train)
   pred_lm=predict(linear_model,newdata=test)
   MSE[i]=mean((test$`Value (in M€)`-pred_lm)^2)
   MAPE[i]=mean(abs((test$`Value (in M€)`-pred_lm)/(test$`Value (in M€)`)))
   
 }
-
+boxplot(MSE)
 MSE_lm=mean(MSE)
 MAPE_lm=mean(MAPE)
-
 print(MSE_lm);print(MAPE_lm)
 ```
 
 #### 2. Trees and Random forests
 
 ```{r}
-n<-nrow(data)
+library(rpart)
+library(rpart.plot)
+n <- nrow(datareg)
 set.seed(12345)
-train_index=sample(1:n,round(0.7*n))
-train=datareg[train_index,]
-test=datareg[-train_index,]
 
-tree<-rpart("Value (in M€)"~., data=train, cp=0.000000001)
-printcp(tree) 
-plotcp(tree)
-alpha.opt<-tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"]
-besttree<-prune(tree, cp=alpha.opt)
-pred<-predict(besttree, newdata=test)
-mean((data$"Value (in M€)"-pred)^2) #quadratic err
+MSE1=rep(NA,50)
+MAPE1=rep(NA,50)
 
+for (i in 1:50) {
+train_index <- sample(1:n,round(0.7*n))
+train <- datareg[train_index,]
+test <- datareg[-train_index,]
+
+tree <- rpart(`Value (in M€)`~., data=train)
+cp_opt <- tree$cptable %>% as.data.frame() %>% 
+  filter(xerror==min(xerror)) %>% 
+  select(CP) %>% as.numeric()
+opt.tree <- prune(tree,cp=cp_opt)
+data.prev <-predict(opt.tree,newdata = test)
+MSE1[i]=mean((test$`Value (in M€)`-data.prev)^2)
+MAPE1[i]=mean(abs((test$`Value (in M€)`-data.prev)/(test$`Value (in M€)`)))
+}
+
+MSE_tree=mean(MSE1)
+MAPE_tree=mean(MAPE1)
+print(MSE_tree);print(MAPE_tree)
+rpart.plot::rpart.plot(opt.tree)
 visTree(besttree)
 ```
