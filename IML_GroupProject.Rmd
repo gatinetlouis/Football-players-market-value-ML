@@ -17,6 +17,7 @@ library(readr)
 library(dplyr)
 library(tidyverse)
 library(ggplot2)
+library(ggExtra)
 library(randomForest)
 library(shiny)
 ```
@@ -164,7 +165,6 @@ nad 300 other players for whom FIFA did not gather the information or was denied
 
 ```{r}
 data = na.omit(data)
-
 ```
 
 How to categorise league names?
@@ -247,15 +247,21 @@ ggplot(dfgraph) +
 
 #### Plot
 ```{r}
-ggplot(data) + 
-  aes(x=Age, y=Overall, colour=log(`Value (in M€)`)) +
-  geom_point(stroke=F, alpha=0.7) +
-  geom_hline(yintercept = median(data$Overall), lty=2, alpha=0.5) +
-  geom_vline(xintercept = median(data$Age), lty=2, alpha=0.5) +
-  geom_smooth(method="lm", size=0.3, se=F, colour="royalblue") +
-  theme_bw() +
-  scale_color_continuous("Log of Players' value", low="grey", high="gold") +
-  scale_x_continuous(limits=c(16, 40))
+plot_central = ggplot(data) + 
+                  aes(x=Age, y=Overall, colour=log(`Value (in M€)`)) +
+                  geom_point(stroke=F, alpha=0.7) +
+                  geom_hline(yintercept = median(data$Overall), lty=2, alpha=0.5) +
+                  geom_vline(xintercept = median(data$Age), lty=2, alpha=0.5) +
+                  geom_smooth(method="loess", size=0.3, se=F, colour="black", show.legend = T) +
+                  theme_bw() +
+                  scale_color_continuous("Transfer Value", low="white", high="blue", labels=NULL) +
+                  scale_x_continuous(limits=c(16, 40)) +
+                  
+                  theme(legend.position="bottom", legend.title = element_text(size=10),
+                        axis.title.x = element_text(face="bold"),
+                        axis.title.y = element_text(face="bold"))
+
+ggMarginal(plot_central, type="boxplot", col="darkblue")
 ```
 
 
