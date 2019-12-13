@@ -250,15 +250,37 @@ ggMarginal(plot_central, type="boxplot", col="darkblue")
 
 # III-Regression models : Predict Value with inputs
 
-#### 1. Linear regression (full°
+Correlogram of the dataset:
+
+```{r}
+install.packages("ggcorrplot")
+library(ggcorrplot)
+datacor <- data %>% select(-Name,
+                           -Nationality,
+                           -Club,
+                           -league_name,
+                           -Field_Position)
+
+datacor$`Preferred Foot` <- as.numeric(datacor$`Preferred Foot` == "Right")
+datacor$`International Reputation` <- as.numeric(datacor$`International Reputation`)
+datacor$`Weak Foot` <- as.numeric(datacor$`Weak Foot`)
+datacor$`Skill Moves` <- as.numeric(datacor$`Skill Moves`)
+datacor$`Offensive Work Rate` <- as.numeric(datacor$`Offensive Work Rate`)
+datacor$`Defensive Work Rate` <- as.numeric(datacor$`Defensive Work Rate`)
+str(datacor)
+corr <- cor(datacor)
+
+
+ggcorrplot(corr, method = "square", tl.cex=5, tl.srt=60)
+```
+
+#### 1. Linear regression (full)
 
 ```{r}
 datareg <- data %>% select(-ID, -Name, -Nationality, -Club)
 #EXPLAIN MORE WHY WE DELETE THESE VARIABLES (corr, dummies, pas besoin koi)
 #We do a 10-folds cross validation
 set.seed(12345)
-MSE = rep(NA,20)
-MAPE = rep(NA,20)
 #Warning message on Position
 ```
 
@@ -268,19 +290,67 @@ folds <- createFolds(1:nrow(datareg),k=20)
 ```
 
 ```{r}
+pred_lm =  rep(NA,nrow(datareg))
+
 for (i in 1:20){
   train <- datareg %>% slice(-folds[[i]])
   test <- datareg %>% slice(folds[[i]])
   linear_model <- lm(`Value (in M€)`~., data=train)
-  pred_lm=predict(linear_model,newdata=test)
-  MSE[i]=mean((test$`Value (in M€)`-pred_lm)^2)
-  MAPE[i]=mean(abs((test$`Value (in M€)`-pred_lm)/(test$`Value (in M€)`)))
-  
+  pred_lm[folds[[i]]]=predict(linear_model,newdata=test)
 }
-boxplot(MSE)
-MSE_lm=mean(MSE)
-MAPE_lm=mean(MAPE)
-print(MSE_lm);print(MAPE_lm)
+
+mean((pred_lm-datareg$`Value (in M€)`)^2)
+```
+
+
+RIDGE
+```{r}
+library(glmnet)
+
+X <- model.matrix(`Value (in M€)`~.,data=datareg)[,-1]
+
+#Find the best lambda for ridge
+my_ridge = cv.glmnet(X,datareg$`Value (in M€)`,alpha = 0,lambda=exp(seq(-8,4,length=100)))
+plot(my_ridge)
+best_lambda_ridge = my_ridge$lambda.min
+
+pred_ridge_linear =  rep(NA,nrow(datareg))
+for (i in 1:20){
+  train.X = X[-folds[[i]],]
+  train.Y = datareg$`Value (in M€)`[-folds[[i]]]
+  test.X = X[folds[[i]],]
+  ridge_linear = glmnet(train.X,train.Y,alpha = 0)
+  pred_ridge_linear[folds[[i]]]=as.vector(predict(ridge_linear,newx=test.X,s=best_lambda_ridge))
+
+}
+```
+
+LASSO
+```{r}
+
+#Find the best lambda for lasso
+my_lasso = cv.glmnet(X,datareg$`Value (in M€)`,alpha = 1,lambda=exp(seq(-40,4,length=200)))
+plot(my_lasso)
+best_lambda_lasso = my_lasso$lambda.min
+
+
+pred_lasso_linear =  rep(NA,nrow(datareg))
+for (i in 1:20){
+  train.X = X[-folds[[i]],]
+  train.Y = datareg$`Value (in M€)`[-folds[[i]]]
+  test.X = X[folds[[i]],]
+  lasso_linear = glmnet(train.X,train.Y,alpha = 1)
+  pred_lasso_linear[folds[[i]]]=as.vector(predict(lasso_linear,newx=test.X,s=best_lambda_lasso))
+
+}
+
+```
+COMPARISON
+
+```{r}
+prev_df=data.frame(pred_lm,pred_ridge_linear,pred_lasso_linear,observed=datareg$`Value (in M€)`)
+
+prev_df%>%summarize_all(~mean((.-observed)^2))
 ```
 
 #### 2. Trees and Random forests
