@@ -398,6 +398,85 @@ MAPE
 We conclude that we won't remove these outliers from the sample
 
 
+**Non parametric model : KNN**
+
+First, find the best k with caret
+```{r}
+library(class)
+
+X <- model.matrix(`Value (in M€)`~.,data=datareg)[,-1]
+dataknn = data.frame(Y=datareg$`Value (in M€)`,X)
+
+grid.k = data.frame(k=seq(1,5,by=1)) #I took a low number to reduce comuting time
+ctrl = trainControl(method="cv",number=5) #I took a low number to reduce comuting time
+select.k = train(Y~.,data =  dataknn, method="knn",trControl=ctrl,tuneGrid=grid.k)
+best.k=select.k$bestTune
+
+```
+
+Then, we compute knn with the best k
+```{r}
+
+pred_knn=rep(NA,nrow(dataknn))
+for (i in 1:20) {
+pred_knn[folds[[i]]]=as.numeric(as.vector(knn(train = dataknn[-folds[[i]],2:69] , test = dataknn[folds[[i]],2:69] ,cl = dataknn[-folds[[i]],1], k=best.k)))
+}
+
+```
+Let's analyse our results : 
+
+```{r}
+
+prev_df_knn = data.frame(pred_knn, Y = dataknn$Y)
+
+MSE_knn = prev_df_knn %>% summarize(MSE_knn=mean((pred_knn-Y)^2))
+MSE_knn
+#Better results
+
+```
+
+
+**Non parametric model : Kernel**
+
+As we need only 1 variable as input in this model, we have decided to do a pca analysis and keep only the first PC.
+
+PCA methodology
+
+```{r}
+library(KernSmooth)
+
+datakernel = data.frame(Y = data$`Value (in M€)`, X)
+my.pca = princomp(datakernel[,-1])
+summary(my.pca)#We take only the first PC to do kernel regression (it represents almost 90% of the total variance so we are satisfied)
+loadings=as.matrix(my.pca$loadings[,1]) #Just to visualise the coefficient of each variable : it is difficult to interpret
+datakernel_pca = data.frame(X = my.pca$scores[,1], Y = datakernel$Y) #We take only scores for each player of the first PC
+plot(datakernel_pca[1:500,]) #For the first 500 players, it seems that there is a negative relation between pca scores and market values.
+plot(datakernel_pca) #Nevertheless, for the whole data it seems that there is no relation between scores and market values but let's test it :
+```
+
+Find the best bandwidth and results
+```{r}
+pred_kernel = rep(NA,nrow(datakernel_pca))
+MSE=rep(NA,100)
+
+for (j in 1:200) {
+    for (i in 1:20){
+    kernel =  ksmooth(datakernel_pca[-folds[[i]],1],
+                      datakernel_pca[-folds[[i]],2],
+                      bandwidth = j/10, #we want to test bandwidths from 0.1 to 20
+                      x.points = datakernel[folds[[i]],1])
+    
+    pred_kernel[folds[[i]]] = kernel$y 
+    }
+MSE[j] = mean((pred_kernel-datakernel_pca$Y)^2,na.rm=T) 
+}
+
+min(MSE) 
+#The lowest MSE is incredibly high : the kernel model with PCA is not relevant for our business problem
+
+```
+
+
 #### 2. Trees and Random forests
 
 ```{r}
