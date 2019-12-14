@@ -4,23 +4,34 @@ author: "A. Piguet - L. Gatinet - J. Guillot"
 output: html_document
 ---
 
-```{r, echo=FALSE, eval=TRUE}
+```{r setup, include=FALSE}
+knitr::opts_chunk$set( warning = FALSE,
+                       echo = TRUE,
+                       message = FALSE,
+                       highlight = TRUE)
+```
+
+```{r}
 my_dir = getwd()
 setwd(my_dir)
 ```
 
-```{r, echo=FALSE, eval=TRUE}
-library(Amelia)
+```{r}
 library(readr)
 library(dplyr)
 library(tidyverse)
 library(ggplot2)
 library(ggExtra)
-library(randomForest)
-library(shiny)
+library(ranger)
+library(caret)
+library(ggcorrplot)
+library(visNetwork)
+library(rpart)
+library(rpart.plot)
+library(qdapRegex)
 ```
 
-```{r, eval=TRUE}
+```{r}
 data = read_csv("fifadata.csv")
 ```
 
@@ -57,8 +68,7 @@ data = data %>% rename(`Value (in M€)` = Value,
 ```
 
 
-```{r, eval=TRUE}
-library(qdapRegex)
+```{r}
 num_club = as.numeric(ex_between(data$`Club Logo`, "light/", ".png"))
 data$num_club = num_club
 
@@ -86,7 +96,7 @@ data[data$league_name %in% df_league_others$league_name, "league_name"] = "Other
 
 Removing the Photo, Flag, Club Logo, Loaned From columns // We removed scores of each players for each position on the field
 Body Type removed because of high correlation with Height and Weight
-```{r, eval=TRUE}
+```{r}
 data = data %>% select(-Photo, 
                        -Flag, 
                        -(LS:RB), 
@@ -253,8 +263,6 @@ ggMarginal(plot_central, type="boxplot", col="darkblue")
 Correlogram of the dataset:
 
 ```{r}
-install.packages("ggcorrplot")
-library(ggcorrplot)
 datacor <- data %>% select(-Name,
                            -Nationality,
                            -Club,
@@ -280,7 +288,6 @@ ggcorrplot(corr, method = "square", tl.cex=5, tl.srt=60)
 datareg <- data %>% select(-ID, -Name, -Nationality, -Club)
 #EXPLAIN MORE WHY WE DELETE THESE VARIABLES (corr, dummies, pas besoin koi)
 #We do a 10-folds cross validation
-set.seed(12345)
 #Warning message on Position
 ```
 
@@ -289,7 +296,7 @@ library(caret)
 folds <- createFolds(1:nrow(datareg),k=20)
 ```
 
-```{r}
+```{r, warning=F}
 pred_lm =  rep(NA,nrow(datareg))
 
 for (i in 1:20){
@@ -350,38 +357,104 @@ COMPARISON
 ```{r}
 prev_df=data.frame(pred_lm,pred_ridge_linear,pred_lasso_linear,observed=datareg$`Value (in M€)`)
 
-prev_df%>%summarize_all(~mean((.-observed)^2))
+prev_df%>%summarize_all(~mean((.-observed)^2)) 
 ```
+
+```{r}
+#First we compute residuals for all models
+df_residuals=data.frame(index = seq(1,nrow(prev_df)),
+                        res_lm = prev_df$observed - prev_df$pred_lm,
+                        res_ridge= prev_df$observed - prev_df$pred_ridge_linear,
+                        res_lasso= prev_df$observed - prev_df$pred_lasso_linear)
+
+#We take the index of top 10 highest residuals for each model
+high_res_lm=head(order(abs(df_residuals$res_lm),decreasing = T),10)
+high_res_ridge=head(order(abs(df_residuals$res_ridge),decreasing = T),10)
+high_res_lasso=head(order(abs(df_residuals$res_lasso),decreasing = T),10)
+
+#We map which players are the outliers : they are almost same players for each model
+residuals_players= data.frame(data[high_res_lm,'Name'],
+                              data[high_res_ridge,'Name'],
+                              data[high_res_lasso,'Name'])
+colnames(residuals_players)=c('lm','ridge','lasso')
+residuals_players
+
+df_residuals2=df_residuals %>% gather(key = model, value = residuals, - index)
+
+#We visualise residuals plot to see that we have large outliers  but not too many
+ggplot(df_residuals2) + aes(x = index, y = residuals, color = model) + geom_point() + facet_grid(~model)
+
+#We could remove them from the sample to see that the MSE is better
+MSE = prev_df%>%slice(-(1:2000))%>%summarize_all(~mean((.-observed)^2))
+MSE
+```
+#But with deeper analysis we understand that the MAPE remains quite high with this change because we have lower values but still a high comparative error
+
+
+```{r, warning=F, message=F}
+MAPE = prev_df%>%slice(-(1:2000))%>%summarize_all(~mean(abs((observed-.)/(observed))))
+MAPE
+```
+We conclude that we won't remove these outliers from the sample
+
 
 #### 2. Trees and Random forests
 
 ```{r}
-library(rpart)
-library(rpart.plot)
-n <- nrow(datareg)
-set.seed(12345)
+pred.tree= as.double(rep(NA,nrow(datareg)))
 
-MSE1=rep(NA,50)
-MAPE1=rep(NA,50)
-
-for (i in 1:50) {
-train_index <- sample(1:n,round(0.7*n))
-train <- datareg[train_index,]
-test <- datareg[-train_index,]
-
+cp_opt = rep (NA,20)
+for (i in 1:20) {
+train <- datareg %>% slice(-folds[[i]])
+test <- datareg %>% slice(folds[[i]])
 tree <- rpart(`Value (in M€)`~., data=train)
-cp_opt <- tree$cptable %>% as.data.frame() %>% 
-  filter(xerror==min(xerror)) %>% 
-  select(CP) %>% as.numeric()
-opt.tree <- prune(tree,cp=cp_opt)
-data.prev <-predict(opt.tree,newdata = test)
-MSE1[i]=mean((test$`Value (in M€)`-data.prev)^2)
-MAPE1[i]=mean(abs((test$`Value (in M€)`-data.prev)/(test$`Value (in M€)`)))
+cp_opt [i] <- tree$cptable %>% 
+          as.data.frame() %>% 
+          filter(xerror==min(xerror)) %>% 
+          select(CP) %>% as.numeric()
+besttree <- prune(tree,cp=cp_opt[i])
+pred.tree[folds[[i]]] <-predict(besttree,newdata = test)
 }
 
-MSE_tree=mean(MSE1)
-MAPE_tree=mean(MAPE1)
-print(MSE_tree);print(MAPE_tree)
-rpart.plot::rpart.plot(opt.tree)
+prev_df <- (prev_df %>% mutate(pred.tree))[,c(1,2,3,5,4)]
+
+prev_df %>% summarize_all(~mean((.-observed)^2))
+#Tree has better MSE
+
+print(cp_opt)
+#We keep the same cp_opt which could mean that there is no much variation between tree used for each fold
+
+rpart.plot::rpart.plot(besttree)
 visTree(besttree)
+```
+
+```{r}
+X<-as.data.frame(datareg[,-4])
+Y<-as.vector(datareg[,4])
+datareg2<-data.frame(X,Y)
+
+summary(datareg2)
+class(datareg)
+
+
+class(datareg2)
+
+RF_small <- ranger(Y ~., data=datareg2, num.trees =500, mtry=16)
+#RF_big <- ranger:: ranger(Value..in.M..~., data=datareg2, num.trees =2500, mtry=50)
+print(RF_small)
+#print(RF_big)
+#comparo<-data.frame(RF_small$predictions,RF_big$predictions, Y)
+#colMeans(data.frame((RF_small$predictions-Y)^2,(RF_big$predictions-Y)^2))
+plot(RF_small)
+#RF$prediction.error
+#plot(RF)
+#ranger:: print.ranger.prediction(RF)
+#ranger:: importance.ranger(RF)
+#predict()
+
+grille.mtry <- data.frame(mtry=seq(1,50,by=5))
+ctrl <- trainControl(method="oob")
+sel.mtry <- train(Y~.,data=datareg2,method="rf",trControl=ctrl,
+                  tuneGrid=grille.mtry)
+sel.mtry$bestTune
 ```
