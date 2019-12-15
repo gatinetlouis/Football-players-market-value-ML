@@ -470,7 +470,7 @@ Let's now compare our results in a table:
 
 ```{r}
 prev_df = data.frame(pred_lm,pred_ridge_linear,pred_lasso_linear,observed=datareg$`Value (in M€)`)
-prev_df %>% summarize_all(~mean((.-observed)^2)) 
+prev_df %>% summarize_all(~mean((.-observed)^2)) %>% select(-observed)
 ```
 
 The penalized regression are not really efficient machines in our case. The ridge parameters are even worse than the classical linear model. We will now make an analysis of the residuals for each machines to better understand what model we should use next. 
