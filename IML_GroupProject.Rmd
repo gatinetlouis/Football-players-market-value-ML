@@ -1,8 +1,18 @@
 ---
-title: "Introduction to Machine Learning - FIFA 2019 Case"
+title: "Introduction to Machine Learning - FIFA 19 Case"
 author: "A. Piguet - L. Gatinet - J. Guillot"
 output: html_document
 ---
+
+## Introduction:
+
+[FIFA 19](https://en.wikipedia.org/wiki/FIFA_19) is a football simulation video game developed by EA Vancouver as part of Electronic Arts' FIFA series. It is the 26^th^ installment in the FIFA series, and was released on 28 September 2018 for PlayStation 3, PlayStation 4, Xbox 360, Xbox One, Nintendo Switch, and Microsoft Windows. 
+
+With more than 45 million unique players worldwide, FIFA is known as the best football video game in the world.
+
+FIFA 19 aggregates each year data on football profesionnal players and their transfers. During the whole case, we will try to find the best algorithm to predict the Transfer Value of players through historical data presented in FIFA 19.
+
+This dataset has been found on [Karan Gadiya's Kaggle page](https://www.kaggle.com/karangadiya/fifa19).
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set( warning = FALSE,
@@ -22,13 +32,15 @@ library(dplyr)
 library(tidyverse)
 library(ggplot2)
 library(ggExtra)
+library(glmnet)
 library(ranger)
 library(caret)
 library(ggcorrplot)
 library(visNetwork)
-library(rpart)
-library(rpart.plot)
 library(qdapRegex)
+library(KernSmooth)
+library(class)
+library(rpart)
 ```
 
 ```{r}
@@ -91,7 +103,6 @@ data = data %>% rename(`Value (in M€)` = Value,
                         `Weight (in kg)` = Weight,
                         `Height (in cm)` = Height)
 ```
-
 
 
 #### Let's adjust some variables
@@ -173,7 +184,8 @@ data$`Skill Moves` = factor(data$`Skill Moves`,
 
 ##### The "Contract Duration" column
 
-Creating a column that captures the remaining duration of the player's contract
+We create a column that captures the remaining duration of the player's contract. And then, we substract 2018 from the contract end date as the year 2018 is the reference year for the data in FIFA 19 (data when the game is release is as of August 31st 2018, for use during season 2018-2019).
+
 ```{r}
 text = NULL; first = NULL; last = NULL
 for (i in 1:nrow(data)) {
@@ -183,35 +195,34 @@ for (i in 1:nrow(data)) {
   data$`Contract Valid Until`[i] = substring(text[i],first[i],last[i])
 }
 
-# On the following line, we substract 2018 from the contract end date as the year 2018 is the reference year for the data in FIFA 19 (data when the game is release is as of August 31st 2018, for use during season 2018-2019)
-
 data$`Remaining Contract Duration` = as.numeric(data$`Contract Valid Until`) - 2018
 data <- data %>% select(-`Contract Valid Until`, -Position)
 ```
-
 
 
 #### Looking for NA values
 
 ```{r}
 na_df = data[which(apply(is.na(data),1,any)),]
-head(df)
+head(na_df)
 ```
 
-All remaining NA's are **players who have been loaned to another team (1264 players)** and **300 other players for whom FIFA did not gather the information or was denied the access.**
+All remaining NA's are **players who have been loaned to another team (1264 players)** and **players for whom FIFA did not gather the information or was denied the access (300).**
 Considering that we have more than 15,000 rows and that players' for whom we have NA's do not follow a particular scheme (we are not removing any precious information), we decided to omit these observations.
 
 ```{r}
+rm(na_df)
 data = na.omit(data)
 ```
 
-
+***
 
 # II-Data Exploration using dplyr & ggplot
 
 
 #### Distribution of the Players' value
-Let's begin this exploratory phase with looking at the distribution of the players' value. The football players' transfer market has been very speculative and insanely growing these past few years. As a result the top 100 players almost do not stand in the same transfer market as other average less gifted players.
+
+Let's begin this exploratory phase with looking at the ***distribution of the players' value***. The football players' transfer market has been very speculative and insanely growing these past few years. As a result the top 100 players almost do not stand in the same transfer market as other average less gifted players.
 Considering this issue and for visualization purposes we will sometimes need to use a log scale for the players' value.
 
 ```{r}
@@ -224,12 +235,13 @@ ggplot(data) +
   scale_x_log10() +
   theme_bw()
 ```
-Looking at this histogram, we see that the distribution is skewed to the right, due to extreme positive outliers. The median stands at 0.675 meaning that more than 50% of the players are valued at less than 5 million euros.
+
+Looking at this histogram, we see that the distribution is skewed to the right, due to extreme positive outliers. The median stands at 0.675 meaning that **more than 50% of the players are valued at less than 5 million euros**.
 
 
 #### Plot of the Value vs Wage
 
-After looking at the distribution of values, several questions arise. We can for instance look at the way the Players' Value and their Wage are correlated. Among all players, Attackers are those known to be the most expensive (some rewards, such as Le Ballon d'Or, testify for the fact that Attackers are attached higher values, sometimes even independently from what they bring to their team). We decided to look at this correlation depending on the Field Position.
+After looking at the distribution of values, several questions arise. We can for instance look at the way the Players' Value and their Wage are correlated. Among all players, Attackers are those known to be the most expensive (some rewards, such as *Le Ballon d'Or*, testify for the fact that Attackers are attached higher values, sometimes even independently from what they bring to their team). We decided to look at this correlation depending on the Field Position.
 
 ```{r}
 ggplot(data) +
@@ -242,9 +254,11 @@ ggplot(data) +
   theme(axis.title=element_text(face="bold"))
 ```
 
-As expected, the players' market value is positively correlated to the players' wages. Looking at the different field positions we see that, for a given market value, Defensers get a better wage than Attackers. This reflects the law of offer and supply: there are more Attackers valued at 30 M€ than Defensers so the latter get better paid.
+As expected, the players' market value is positively correlated to the players' wages. Looking at the different field positions we see that, for a given market value, **Defensers get a better wage than Attackers**. This reflects the law of offer and supply: **there are more Attackers valued at 30 M€ than Defensers so the latter get better paid**.
+
 
 #### Plot of the Value vs Work Rate
+
 ```{r}
 ggplot(data) +
   aes(x=`Offensive Work Rate`, y=`Value (in M€)`, fill=`Offensive Work Rate`) +
@@ -253,12 +267,12 @@ ggplot(data) +
   theme_bw()
 ```
 
-This boxplot graph confirms that players who bring the most to their team offensively are more values than others (for this group, we note a median above 10 million euros). We also see that these Offensive players have a big variance in their Values distribution. This surely stems from the fact that the most expensive players in the world (extreme positive outliers) often have a high offensive work rate.
+This boxplot graph confirms that **players who bring the most to their team offensively are more valued than others** (for this group, we note a median above 10 million euros). We also see that these Offensive players have a big variance in their Values distribution. This surely stems from the fact that **the most expensive players in the world (extreme positive outliers) often have a high offensive work rate**.
+
 
 #### Plot of the Value vs Overall Grade
 
 Another natural question that arise is about the correlation of the Value and the Overall grade a player gets in the FIFA video game. Here again, regarding the big gaps in values between Field Position, we faceted our graph according to Field Position.
-
 
 ```{r}
 ggplot(data) +
@@ -271,11 +285,16 @@ ggplot(data) +
         axis.text.x = element_blank(),
         axis.ticks.x = element_blank())
 ```
-Obviously, the higher the grade, the higher the value. But what is interesting is that, for Defensers, this might not be as simple as this when the overall grade gets the highest, the value seems to be steady. For Goalkeepers too, the logic looks a bit more complex. Regarding Mitfielders and Attackers, the logic is respected and we have large variances in the Value.
+
+Obviously, the higher the grade, the higher the value. But what is interesting is that, for Defensers, this might not be as simple as this **when the overall grade gets the highest, the value seems to be steady**. For Goalkeepers too, the logic looks a bit more complex. Regarding Mitfielders and Attackers, the logic is respected and we have large variances in the Value.
 
 Let's dig deeper into the causes of that variance.
 
+
 #### Plot of the Value vs Age
+
+In the context of short term career in professionnal football, we wanted to ask how Age was linked with the Value of Players. So we group our dataset by Age and computed a percentage ratio to visualize this distribtion. Comparing Age and Value in a two-axis graph with boxplot for each Age give the following graph:
+
 ```{r}
 dfgraph <- data %>% 
   group_by(Age) %>% 
@@ -294,7 +313,12 @@ ggplot(dfgraph) +
         legend.title = element_text(face="bold"))
 ```
 
+First of all, the Age distribution in our dataset goes from 16 to 41 with, as expected the highest percentage of total population between 21 and 26 years old. However, the biggest Values in Millions of euros are achieved between 27 and 30 years old, meaning that experience is at some point significant for evaluating players' Values. One can also notice the important number of outliers for Age between 19 and 23 years, whom can be identified as "young gifted players". And finally after 31 years old, the Age representation in the total population of professional players decreases, so does the Value. There is also more room for outliers at this Age, explaining the large variances from a year to another.
+
 #### Plot of the Value vs Age and Overall Grade
+
+Let's now put all together the two previous graphs with this last one placing Age on the x-axis and Overall Grade on the y-axis, we want to clarify how the experience influences the overall grade and skills of a player, and also how well this Overall Grade is represented through Value in million euros (here quantified through color opacity).
+
 ```{r}
 plot_central = ggplot(data) + 
                   aes(x=Age, y=Overall, colour=log(`Value (in M€)`)) +
@@ -312,12 +336,17 @@ plot_central = ggplot(data) +
 ggMarginal(plot_central, type="boxplot", col="darkblue")
 ```
 
+Statistics shows that medians are 25 for Age and 66 for Overall. We find again out outliers in the Overall Grade distribution, explained by the highly known and talented players (that are also the highest in Transfer Value). The smoothing line shows something interesting, there is at some point a decrease in the Overall Grade (starting after 30 years old). This depreciation of the grade is also represented in the transfer Value, even if minimum Overall grade tends to highly increase as long as Age is increasing (46 for the 'below-20', 57 for the 'above-40').
 
 ***
 
 # III-Regression models : Predict Value with inputs
 
-Correlogram of the dataset:
+As a reminder, our goal in this FIFA 19 case is to predict - i.e. to find the best machine that explain - the Value in Million euros of professional football players. 
+
+Mathematically speaking, this variable to explain, the Y, is continuous. Hence, we are faced with a regression problem. As a starting statement, we propose to make a correlogram of the explaining variables, the Xs.
+
+**Correlogram of the dataset:**
 
 ```{r}
 datacor <- data %>% select(-Name,
@@ -332,28 +361,34 @@ datacor$`Weak Foot` <- as.numeric(datacor$`Weak Foot`)
 datacor$`Skill Moves` <- as.numeric(datacor$`Skill Moves`)
 datacor$`Offensive Work Rate` <- as.numeric(datacor$`Offensive Work Rate`)
 datacor$`Defensive Work Rate` <- as.numeric(datacor$`Defensive Work Rate`)
+
 str(datacor)
 corr <- cor(datacor)
-
 
 ggcorrplot(corr, method = "square", tl.cex=5, tl.srt=60)
 ```
 
-#### 1. Linear regression (full)
+To avoid several unrelevant dummies in our analysis, we clear the dataset from some columns:
+-ID
+-Name
+-Nationality
+-Club
 
 ```{r}
 datareg <- data %>% select(-ID, -Name, -Nationality, -Club)
-#EXPLAIN MORE WHY WE DELETE THESE VARIABLES (corr, dummies, pas besoin koi)
-#We do a 10-folds cross validation
-#Warning message on Position
 ```
 
+For comparing the following machines, we will compute the **mean squared error** and each algorithm will be performed using a **20 times cross-validation**. 
+
 ```{r}
-library(caret)
 folds <- createFolds(1:nrow(datareg),k=20)
 ```
 
-```{r, warning=F}
+**Linear regression:**
+
+First of all, we begin with a classical linear regression model, with big assumption but a good starting point for any prediction problem.
+
+```{r}
 pred_lm =  rep(NA,nrow(datareg))
 
 for (i in 1:20){
@@ -366,34 +401,32 @@ for (i in 1:20){
 mean((pred_lm-datareg$`Value (in M€)`)^2)
 ```
 
+With a high MSE, and a large number of predictors (more than 50), we will now fit two penalized regression model, a ridge regression and a lasso regression
 
-RIDGE
+**Ridge:**
+
 ```{r}
-library(glmnet)
+X = model.matrix(`Value (in M€)`~.,data=datareg)[,-1]
 
-X <- model.matrix(`Value (in M€)`~.,data=datareg)[,-1]
-
-#Find the best lambda for ridge
 my_ridge = cv.glmnet(X,datareg$`Value (in M€)`,alpha = 0,lambda=exp(seq(-8,4,length=100)))
 plot(my_ridge)
 best_lambda_ridge = my_ridge$lambda.min
 
-pred_ridge_linear =  rep(NA,nrow(datareg))
+pred_ridge_linear =  rep(NA, nrow(datareg))
 for (i in 1:20){
   train.X = X[-folds[[i]],]
   train.Y = datareg$`Value (in M€)`[-folds[[i]]]
   test.X = X[folds[[i]],]
-  ridge_linear = glmnet(train.X,train.Y,alpha = 0)
-  pred_ridge_linear[folds[[i]]]=as.vector(predict(ridge_linear,newx=test.X,s=best_lambda_ridge))
+  ridge_linear = glmnet(train.X, train.Y, alpha = 0)
+  pred_ridge_linear[folds[[i]]] = as.vector(predict(ridge_linear, newx = test.X, s = best_lambda_ridge))
 
 }
 ```
 
-LASSO
-```{r}
+**Lasso :**
 
-#Find the best lambda for lasso
-my_lasso = cv.glmnet(X,datareg$`Value (in M€)`,alpha = 1,lambda=exp(seq(-40,4,length=200)))
+```{r}
+my_lasso = cv.glmnet(X,datareg$`Value (in M€)`,alpha = 1,lambda = exp(seq(-40,4,length = 200)))
 plot(my_lasso)
 best_lambda_lasso = my_lasso$lambda.min
 
@@ -403,118 +436,145 @@ for (i in 1:20){
   train.X = X[-folds[[i]],]
   train.Y = datareg$`Value (in M€)`[-folds[[i]]]
   test.X = X[folds[[i]],]
-  lasso_linear = glmnet(train.X,train.Y,alpha = 1)
-  pred_lasso_linear[folds[[i]]]=as.vector(predict(lasso_linear,newx=test.X,s=best_lambda_lasso))
+  lasso_linear = glmnet(train.X, train.Y, alpha = 1)
+  pred_lasso_linear[folds[[i]]] = as.vector(predict(lasso_linear, newx = test.X, s = best_lambda_lasso))
 
 }
-
-```
-COMPARISON
-
-```{r}
-prev_df=data.frame(pred_lm,pred_ridge_linear,pred_lasso_linear,observed=datareg$`Value (in M€)`)
-
-prev_df%>%summarize_all(~mean((.-observed)^2)) 
 ```
 
+Let's now compare our results in a table:
+
 ```{r}
-#First we compute residuals for all models
-df_residuals=data.frame(index = seq(1,nrow(prev_df)),
+prev_df = data.frame(pred_lm,pred_ridge_linear,pred_lasso_linear,observed=datareg$`Value (in M€)`)
+prev_df %>% summarize_all(~mean((.-observed)^2)) 
+```
+
+The penalized regression are not really efficient machines in our case. The ridge parameters are even worse than the classical linear model. We will now make an analysis of the residuals for each machines to better understand what model we should use next. 
+
+```{r}
+df_residuals = data.frame(index = seq(1,nrow(prev_df)),
                         res_lm = prev_df$observed - prev_df$pred_lm,
-                        res_ridge= prev_df$observed - prev_df$pred_ridge_linear,
-                        res_lasso= prev_df$observed - prev_df$pred_lasso_linear)
+                        res_ridge = prev_df$observed - prev_df$pred_ridge_linear,
+                        res_lasso = prev_df$observed - prev_df$pred_lasso_linear)
+```
 
 #We take the index of top 10 highest residuals for each model
-high_res_lm=head(order(abs(df_residuals$res_lm),decreasing = T),10)
-high_res_ridge=head(order(abs(df_residuals$res_ridge),decreasing = T),10)
-high_res_lasso=head(order(abs(df_residuals$res_lasso),decreasing = T),10)
 
-#We map which players are the outliers : they are almost same players for each model
-residuals_players= data.frame(data[high_res_lm,'Name'],
+```{r}
+high_res_lm = head(order(abs(df_residuals$res_lm),decreasing = T),10)
+high_res_ridge = head(order(abs(df_residuals$res_ridge),decreasing = T),10)
+high_res_lasso = head(order(abs(df_residuals$res_lasso),decreasing = T),10)
+```
+
+Which players are the outliers ? They are almost the same players for each model.
+
+```{r}
+residuals_players = data.frame(data[high_res_lm,'Name'],
                               data[high_res_ridge,'Name'],
                               data[high_res_lasso,'Name'])
-colnames(residuals_players)=c('lm','ridge','lasso')
+colnames(residuals_players) = c('lm','ridge','lasso')
 residuals_players
 
-df_residuals2=df_residuals %>% gather(key = model, value = residuals, - index)
+df_residuals2 = df_residuals %>% gather(key = model, value = residuals, - index)
+```
 
-#We visualise residuals plot to see that we have large outliers  but not too many
-ggplot(df_residuals2) + aes(x = index, y = residuals, color = model) + geom_point() + facet_grid(~model)
+We now visualise residual plots to see that we have large outliers but not too many. Let's also compute the MSE.
 
-#We could remove them from the sample to see that the MSE is better
-MSE = prev_df%>%slice(-(1:2000))%>%summarize_all(~mean((.-observed)^2))
+```{r}
+ggplot(df_residuals2) +
+  aes(x = index, y = residuals, color = model) +
+  geom_point() +
+  facet_grid(~model)
+
+
+MSE = prev_df %>% slice(-(1:2000)) %>% summarize_all(~mean((.-observed)^2))
 MSE
 ```
-#But with deeper analysis we understand that the MAPE remains quite high with this change because we have lower values but still a high comparative error
+
+We could remove them from the sample to see that the MSE is better, but with deeper analysis we understand that the MAPE remains quite high with this change because we have lower values but still a high comparative error.
 
 
-```{r, warning=F, message=F}
-MAPE = prev_df%>%slice(-(1:2000))%>%summarize_all(~mean(abs((observed-.)/(observed))))
+```{r}
+MAPE = prev_df %>% slice(-(1:2000)) %>% summarize_all(~mean(abs((observed-.)/(observed))))
 MAPE
 ```
-We conclude that we won't remove these outliers from the sample
+
+We conclude that we won't remove these outliers from the sample, and that the linear model is not the most relevant one.
+
+We will now move to non-parametric models to investigate on which set of model is the best fit for our FIFA 19 dataset.
 
 
-**Non parametric model : KNN**
+**Non parametric model : k-nearest neighbors**
 
-First, find the best k with caret
+First, find the best k with *caret*:
+
 ```{r}
-library(class)
-
-X <- model.matrix(`Value (in M€)`~.,data=datareg)[,-1]
+X = model.matrix(`Value (in M€)`~.,data=datareg)[,-1]
 dataknn = data.frame(Y=datareg$`Value (in M€)`,X)
 
-grid.k = data.frame(k=seq(1,5,by=1)) #I took a low number to reduce comuting time
-ctrl = trainControl(method="cv",number=5) #I took a low number to reduce comuting time
+grid.k = data.frame(k=seq(1,5,by=1)) #We took a low number to reduce comuting time
+ctrl = trainControl(method="cv",number=5)
 select.k = train(Y~.,data =  dataknn, method="knn",trControl=ctrl,tuneGrid=grid.k)
 best.k=select.k$bestTune
 
 ```
 
-Then, we compute knn with the best k
-```{r}
+Then, we fit the knn model with the best k:
 
-pred_knn=rep(NA,nrow(dataknn))
+```{r}
+pred_knn = rep(NA,nrow(dataknn))
 for (i in 1:20) {
 pred_knn[folds[[i]]]=as.numeric(as.vector(knn(train = dataknn[-folds[[i]],2:69] , test = dataknn[folds[[i]],2:69] ,cl = dataknn[-folds[[i]],1], k=best.k)))
 }
 
 ```
+
 Let's analyse our results : 
 
 ```{r}
-
 prev_df_knn = data.frame(pred_knn, Y = dataknn$Y)
 
 MSE_knn = prev_df_knn %>% summarize(MSE_knn=mean((pred_knn-Y)^2))
 MSE_knn
-#Better results
-
 ```
 
+We have definitely better results when using k-nearest neighbors algorithm.
 
 **Non parametric model : Kernel**
 
-As we need only 1 variable as input in this model, we have decided to do a pca analysis and keep only the first PC.
+As we need only 1 variable as input in this model, we have decided to do a PCA and keep only the first principal component.
 
-PCA methodology
+PCA methodology:
+
+#We take only the first PC to do kernel regression (it represents almost 90% of the total variance so we are satisfied)
+#Just to visualise the coefficient of each variable : it is difficult to interpret
+#We take only scores for each player of the first PC
 
 ```{r}
-library(KernSmooth)
-
 datakernel = data.frame(Y = data$`Value (in M€)`, X)
 my.pca = princomp(datakernel[,-1])
-summary(my.pca)#We take only the first PC to do kernel regression (it represents almost 90% of the total variance so we are satisfied)
-loadings=as.matrix(my.pca$loadings[,1]) #Just to visualise the coefficient of each variable : it is difficult to interpret
-datakernel_pca = data.frame(X = my.pca$scores[,1], Y = datakernel$Y) #We take only scores for each player of the first PC
-plot(datakernel_pca[1:500,]) #For the first 500 players, it seems that there is a negative relation between pca scores and market values.
-plot(datakernel_pca) #Nevertheless, for the whole data it seems that there is no relation between scores and market values but let's test it :
+summary(my.pca)
+
+loadings = as.matrix(my.pca$loadings[,1])
+
+datakernel_pca = data.frame(X = my.pca$scores[,1], Y = datakernel$Y)
+
+plot(datakernel_pca[1:500,])
+
+plot(datakernel_pca)
 ```
 
-Find the best bandwidth and results
+We take only the first principal component to do kernel regression (it represents almost 90% of the total variance so we are satisfied). We tried to visualise the coefficient of each variable, yet here it is difficult to interpret.
+
+We take only scores for each player of the first PC. And for the first 500 players, it seems that there is a negative relation between PCA scores and the Value variable.
+
+Nevertheless, for the whole data it seems that there is no relation between scores and market values but let's test it now.
+
+Beforehand, let us find the best bandwidth and results:
+
 ```{r}
 pred_kernel = rep(NA,nrow(datakernel_pca))
-MSE=rep(NA,100)
+MSE_kern=rep(NA,100)
 
 for (j in 1:200) {
     for (i in 1:20){
@@ -525,96 +585,68 @@ for (j in 1:200) {
     
     pred_kernel[folds[[i]]] = kernel$y 
     }
-MSE[j] = mean((pred_kernel-datakernel_pca$Y)^2,na.rm=T) 
+MSE_kern[j] = mean((pred_kernel-datakernel_pca$Y)^2,na.rm=T) 
 }
 
-min(MSE) 
-#The lowest MSE is incredibly high : the kernel model with PCA is not relevant for our business problem
-
+min(MSE_kern) 
 ```
 
+The lowest MSE is incredibly high : the kernel model with PCA is not relevant for our business problem.
 
-#### 2. Trees and Random forests
+**Trees and Random forests**
+
+The last family of machine that we will try is Trees and random forests. For the first one, we will try to find the optimal number of splits using the 20 times cross-validation. However, for the second one, we assume that the parameter *mtry* is set to default value 17 (i.e. the number of dimension divided by 3, rounded). With more computing power, we would have try to get a better tuning parameter *mtry*.
 
 ```{r}
-pred.tree= as.double(rep(NA,nrow(datareg)))
+pred.tree = as.double(rep(NA,nrow(datareg)))
 
 cp_opt = rep (NA,20)
 for (i in 1:20) {
-train <- datareg %>% slice(-folds[[i]])
-test <- datareg %>% slice(folds[[i]])
-tree <- rpart(`Value (in M€)`~., data=train)
-cp_opt [i] <- tree$cptable %>% 
+train = datareg %>% slice(-folds[[i]])
+test = datareg %>% slice(folds[[i]])
+tree = rpart(`Value (in M€)`~., data=train)
+cp_opt [i] = tree$cptable %>% 
           as.data.frame() %>% 
           filter(xerror==min(xerror)) %>% 
           select(CP) %>% as.numeric()
-besttree <- prune(tree,cp=cp_opt[i])
-pred.tree[folds[[i]]] <-predict(besttree,newdata = test)
+besttree = prune(tree,cp=cp_opt[i])
+pred.tree[folds[[i]]] = predict(besttree,newdata = test)
 }
 
-prev_df <- (prev_df %>% mutate(pred.tree))[,c(1,2,3,5,4)]
+prev_df = (prev_df %>% mutate(pred.tree))[,c(1,2,3,5,4)]
 
 prev_df %>% summarize_all(~mean((.-observed)^2))
-#Tree has better MSE
 
 print(cp_opt)
-#We keep the same cp_opt which could mean that there is no much variation between tree used for each fold
 
-rpart.plot::rpart.plot(besttree)
 visTree(besttree)
 ```
 
-```{r}
-X<-as.data.frame(datareg[,-4])
-Y<-as.vector(datareg[,4])
-datareg2<-data.frame(X,Y)
+It appears clearly here that with Trees we have a better MSE. One can notify that the optimal CP is the same for all the trees that we fitted, meaning that there is no much variation between tree used for each fold. One can visualize a example of Tree with visNetwork package. On the later, we are seeing that the Overall Grade and the Release clause are used as splitting variables.
 
-summary(datareg2)
-class(datareg)
-
-
-class(datareg2)
-
-RF_small <- ranger(Y ~., data=datareg2, num.trees =500, mtry=16)
-#RF_big <- ranger:: ranger(Value..in.M..~., data=datareg2, num.trees =2500, mtry=50)
-print(RF_small)
-#print(RF_big)
-#comparo<-data.frame(RF_small$predictions,RF_big$predictions, Y)
-#colMeans(data.frame((RF_small$predictions-Y)^2,(RF_big$predictions-Y)^2))
-plot(RF_small)
-#RF$prediction.error
-#plot(RF)
-#ranger:: print.ranger.prediction(RF)
-#ranger:: importance.ranger(RF)
-#predict()
-
-grille.mtry <- data.frame(mtry=seq(1,50,by=5))
-ctrl <- trainControl(method="oob")
-sel.mtry <- train(Y~.,data=datareg2,method="rf",trControl=ctrl,
-                  tuneGrid=grille.mtry)
-sel.mtry$bestTune
-```
-
+Let's now find out if Random Forests can help us in getting a better MSE.
 
 ```{r}
-X<-as.data.frame(datareg[,-4]) ; Y<-as.vector(datareg[,4])
-datareg2<-data.frame(X,Y)
+x = as.data.frame(datareg[,-4]) ; y = as.vector(datareg[,4])
+datareg2 = data.frame(x,y)
 #We transform here the data into a data frame to keep a consistent format for the random forest machine.
 
-m = round(length(X)/3)
-#We assume that the best mtry parameter is set to m. With more CPU, we would have try to get a better tuning parameter.
+m = round(length(x)/3)
 
 pred_rf = rep(NA,nrow(datareg2))
 for (i in 1:20){
-  train <- datareg2 %>% slice(-folds[[i]])
-  test <- datareg2 %>% slice(folds[[i]])
-  rf <- ranger(Value..in.M..~.,data=train,num.trees = 500,mtry=m)
-  pred_rf[folds[[i]]] <- predict(rf,data=test)$predictions
+  train = datareg2 %>% slice(-folds[[i]])
+  test = datareg2 %>% slice(folds[[i]])
+  rf = ranger(Value..in.M..~.,data=train,num.trees = 500,mtry=m)
+  pred_rf[folds[[i]]] = predict(rf,data=test)$predictions
 }
 
-prev_df <- (prev_df %>% mutate(pred_rf))[,c(1,2,3,4,6,5)]
+prev_df = (prev_df %>% mutate(pred_rf))[,c(1,2,3,4,6,5)]
 prev_df %>% summarize_all(~mean((.-observed)^2))
-
-#Comparing all MSE, we now know that random forest is the best in predicting players Value. To keep increase performance, we would have select a better tuning parameter using the caret package.
 ```
 
+
+## Conclusion: 
+
+
+Comparing all MSE, we now know that **Random Forest is the best machine in predicting players' Value in million euros**. To keep increase performance and under assumption that we have more computation power, we would select a better tuning parameter using the caret package.
