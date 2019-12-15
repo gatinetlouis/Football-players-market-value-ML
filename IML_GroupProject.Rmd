@@ -37,11 +37,34 @@ data = read_csv("fifadata.csv")
 
 # I-Data cleaning using dplyr:
 
-To further use the 'Championship' variable in a relevant manner, we decided to remove championships for which some clubs are missing (namely championships FIFA 19 did not get the right to refer to) RAJOUTER SOURCE WIKI
+#### Removing useless, noisy variables
+For various reason, we need to remove some variables from our dataset in order to apply machine learning algorithms.
 
+**X1** is an "ID" column we do not need.
+**Photo**, **Flag** and **Club Logo** are just url links leading to logos.
+**Special** does not relate to anything documented on the dataset source.
+For the other removed variables, we considered they did not add anything when explaining a player's financial value at a given moment.
 
-#### Converting financial values as integers (Wage, Release Clause and Value) + Wage/Height
 ```{r}
+data = data %>% select(-X1,
+                       -Photo, 
+                       -Flag,
+                       -Special, 
+                       -`Body Type`,
+                       -`Real Face`, 
+                       -`Jersey Number`,
+                       -Joined, 
+                       -`Loaned From`,
+                       -(LS:RB), 
+                       )
+```
+
+
+#### Converting numeric values
+
+We first want some values to be converted into International Metric System or remove units so that they are considered as double or integer by R.
+```{r}
+# Financial variables
 data$Value = ifelse(substring(data$Value, 
                               nchar(data$Value)) == "M",
                               as.numeric(substring(data$Value,2,nchar(data$Value)-1)),
@@ -52,7 +75,7 @@ data$Wage = as.numeric(substring(data$Wage,2,nchar(data$Wage)-1))
 data$`Release Clause` = as.numeric(substring(data$`Release Clause`,2,nchar(data$`Release Clause`)-1))
 
 
-
+# Players' measurements
 data$Weight = as.numeric(substring(data$Weight, 1, 3)) * 0.45359237
 
 data = data %>% 
@@ -60,6 +83,8 @@ data = data %>%
   mutate(Height = (12*feet + inches)*2.54) %>% 
   select(-inches, -feet)
 
+
+# Renaming our variables
 data = data %>% rename(`Value (in M€)` = Value,
                         `Wage (in K€)` = Wage,
                         `Release Clause (in M€)` = `Release Clause`,
@@ -67,6 +92,16 @@ data = data %>% rename(`Value (in M€)` = Value,
                         `Height (in cm)` = Height)
 ```
 
+
+
+#### Let's adjust some variables
+
+
+##### The "Championship" variable
+Here we use a csv file ('club.csv') that matches each club with the corresponding championship to create a **"Championship" variable**. To further use the 'Championship' variable in a relevant manner, we decided to **remove championships for which some clubs are missing** (namely championships FIFA 19 did not get the right to refer to).
+Details can be found [on the FIFA 19 Wikipedia page](https://fr.wikipedia.org/wiki/FIFA_19#Championnats)
+
+Looking at the ranking of our leagues, we remark a gap in average player tranfer value between the 6th championship (the Portuguese one) and those following. For visualization purposes and as these first 6 championships are the most known ones, we decide to keep them and aggregate the others under an "Other" category.
 
 ```{r}
 num_club = as.numeric(ex_between(data$`Club Logo`, "light/", ".png"))
@@ -89,30 +124,21 @@ df_league = data %>%
   group_by(league_name) %>% 
   summarise(value=mean(`Value (in M€)`)) %>% 
   arrange(desc(value))
-#Looking at the ranking of our leagues, we remark a gap in average player tranfer value between the 6th championship (the Portuguese one) and those following. For visualization purposes and as these first 6 championships are the most known ones, we decide to keep them and aggregate the others in under an "Other" category.
+
+
+# Aggregating minor championships into an "Others" category
 df_league_others = df_league %>% slice(7:nrow(df_league))
 data[data$league_name %in% df_league_others$league_name, "league_name"] = "Others"
+
+# Finally, we remove the "Club Logo" variable since we do not need it anymore
+data = data %>% select(-`Club Logo`)
+
 ```
 
-Removing the Photo, Flag, Club Logo, Loaned From columns // We removed scores of each players for each position on the field
-Body Type removed because of high correlation with Height and Weight
-```{r}
-data = data %>% select(-Photo, 
-                       -Flag, 
-                       -(LS:RB), 
-                       -Joined, 
-                       -`Loaned From`, 
-                       -X1, 
-                       -Special, 
-                       -`Real Face`, 
-                       -`Body Type`, 
-                       -`Jersey Number`,
-                       -`Club Logo`,
-                       -num_club)
-```
 
-Create categories for field positions
+##### The "Field Position" variable
 
+We decided to use the information included in the **Position** variable to create a more meaningful variable telling what line the player plays on on the field (Goalkeeper, Defenser, Mitfielder, Attack)
 ```{r}
 data$Field_Position = rep(0,nrow(data))
 for (i in 1:nrow(data)) {
@@ -123,7 +149,8 @@ for (i in 1:nrow(data)) {
 }
 ```
 
-#### Splitting the Work Rate column into its 2 components (Offensive / Defensive)
+
+##### Splitting the "Work Rate" column into its 2 components (Offensive / Defensive)
 ```{r}
 data = data %>% separate(`Work Rate`, c('Offensive Work Rate', 'Defensive Work Rate'), "/ ")
 
@@ -141,11 +168,12 @@ data$`Weak Foot` = factor(data$`Weak Foot`,
                           levels=1:5)
 data$`Skill Moves` = factor(data$`Skill Moves`, 
                             levels=1:5)
-data$Club <- as.factor(data$Club)
 ```
 
-#### Creating a column that captures the remaining duration of the player's contract
 
+##### The "Contract Duration" column
+
+Creating a column that captures the remaining duration of the player's contract
 ```{r}
 text = NULL; first = NULL; last = NULL
 for (i in 1:nrow(data)) {
@@ -154,35 +182,55 @@ for (i in 1:nrow(data)) {
   last[i] = nchar(text[i])
   data$`Contract Valid Until`[i] = substring(text[i],first[i],last[i])
 }
+
+# On the following line, we substract 2018 from the contract end date as the year 2018 is the reference year for the data in FIFA 19 (data when the game is release is as of August 31st 2018, for use during season 2018-2019)
+
 data$`Remaining Contract Duration` = as.numeric(data$`Contract Valid Until`) - 2018
 data <- data %>% select(-`Contract Valid Until`, -Position)
 ```
 
 
+
+#### Looking for NA values
+
 ```{r}
-df = data[which(apply(is.na(data),1,any)),]
+na_df = data[which(apply(is.na(data),1,any)),]
 head(df)
 ```
 
-All remaining NA's are players who have been loaned to another team (1264 players) 
-
-nad 300 other players for whom FIFA did not gather the information or was denied the access
+All remaining NA's are **players who have been loaned to another team (1264 players)** and **300 other players for whom FIFA did not gather the information or was denied the access.**
+Considering that we have more than 15,000 rows and that players' for whom we have NA's do not follow a particular scheme (we are not removing any precious information), we decided to omit these observations.
 
 ```{r}
 data = na.omit(data)
 ```
 
+
+
 # II-Data Exploration using dplyr & ggplot
 
+
+#### Distribution of the Players' value
+Let's begin this exploratory phase with looking at the distribution of the players' value. The football players' transfer market has been very speculative and insanely growing these past few years. As a result the top 100 players almost do not stand in the same transfer market as other average less gifted players.
+Considering this issue and for visualization purposes we will sometimes need to use a log scale for the players' value.
+
 ```{r}
+med = median(data$`Value (in M€)`)
+
 ggplot(data) + 
   aes(x=`Value (in M€)`) + 
-  geom_histogram(bins=30) + 
+  geom_histogram() + 
+  geom_vline(aes(xintercept=med),col="red") +
   scale_x_log10() +
   theme_bw()
 ```
+Looking at this histogram, we see that the distribution is skewed to the right, due to extreme positive outliers. The median stands at 0.675 meaning that more than 50% of the players are valued at less than 5 million euros.
 
-#### Plot of the Value vs Remaining Contract Years
+
+#### Plot of the Value vs Wage
+
+After looking at the distribution of values, several questions arise. We can for instance look at the way the Players' Value and their Wage are correlated. Among all players, Attackers are those known to be the most expensive (some rewards, such as Le Ballon d'Or, testify for the fact that Attackers are attached higher values, sometimes even independently from what they bring to their team). We decided to look at this correlation depending on the Field Position.
+
 ```{r}
 ggplot(data) +
   aes(x=`Wage (in K€)`, y=`Value (in M€)`, colour=Field_Position) +
@@ -196,7 +244,7 @@ ggplot(data) +
 
 As expected, the players' market value is positively correlated to the players' wages. Looking at the different field positions we see that, for a given market value, Defensers get a better wage than Attackers. This reflects the law of offer and supply: there are more Attackers valued at 30 M€ than Defensers so the latter get better paid.
 
-#### Plot
+#### Plot of the Value vs Work Rate
 ```{r}
 ggplot(data) +
   aes(x=`Offensive Work Rate`, y=`Value (in M€)`, fill=`Offensive Work Rate`) +
@@ -205,20 +253,29 @@ ggplot(data) +
   theme_bw()
 ```
 
+This boxplot graph confirms that players who bring the most to their team offensively are more values than others (for this group, we note a median above 10 million euros). We also see that these Offensive players have a big variance in their Values distribution. This surely stems from the fact that the most expensive players in the world (extreme positive outliers) often have a high offensive work rate.
 
-#### Plot
+#### Plot of the Value vs Overall Grade
+
+Another natural question that arise is about the correlation of the Value and the Overall grade a player gets in the FIFA video game. Here again, regarding the big gaps in values between Field Position, we faceted our graph according to Field Position.
+
+
 ```{r}
 ggplot(data) +
   aes(group=Overall, y=`Value (in M€)`, fill=Overall) +
   geom_boxplot(colour="Black", size=0.3) +
-  scale_fill_gradient2(low="Red", mid="Red", high="Blue", midpoint=75) +
+  scale_fill_gradient2(low="Red", mid="Red", high="Blue", midpoint=73) +
   scale_x_continuous(limits=c(0.1,0.4)) +
   facet_grid(Field_Position~.) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom",
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
 ```
+Obviously, the higher the grade, the higher the value. But what is interesting is that, for Defensers, this might not be as simple as this when the overall grade gets the highest, the value seems to be steady. For Goalkeepers too, the logic looks a bit more complex. Regarding Mitfielders and Attackers, the logic is respected and we have large variances in the Value.
 
+Let's dig deeper into the causes of that variance.
 
-#### Plot
+#### Plot of the Value vs Age
 ```{r}
 dfgraph <- data %>% 
   group_by(Age) %>% 
@@ -237,7 +294,7 @@ ggplot(dfgraph) +
         legend.title = element_text(face="bold"))
 ```
 
-#### Plot
+#### Plot of the Value vs Age and Overall Grade
 ```{r}
 plot_central = ggplot(data) + 
                   aes(x=Age, y=Overall, colour=log(`Value (in M€)`)) +
@@ -248,10 +305,10 @@ plot_central = ggplot(data) +
                   theme_bw() +
                   scale_color_continuous("Transfer Value", low="white", high="blue", labels=NULL) +
                   scale_x_continuous(limits=c(16, 40)) +
-                  
                   theme(legend.position="bottom", legend.title = element_text(size=10),
                         axis.title.x = element_text(face="bold"),
                         axis.title.y = element_text(face="bold"))
+
 ggMarginal(plot_central, type="boxplot", col="darkblue")
 ```
 
@@ -537,3 +594,27 @@ sel.mtry <- train(Y~.,data=datareg2,method="rf",trControl=ctrl,
                   tuneGrid=grille.mtry)
 sel.mtry$bestTune
 ```
+
+
+```{r}
+X<-as.data.frame(datareg[,-4]) ; Y<-as.vector(datareg[,4])
+datareg2<-data.frame(X,Y)
+#We transform here the data into a data frame to keep a consistent format for the random forest machine.
+
+m = round(length(X)/3)
+#We assume that the best mtry parameter is set to m. With more CPU, we would have try to get a better tuning parameter.
+
+pred_rf = rep(NA,nrow(datareg2))
+for (i in 1:20){
+  train <- datareg2 %>% slice(-folds[[i]])
+  test <- datareg2 %>% slice(folds[[i]])
+  rf <- ranger(Value..in.M..~.,data=train,num.trees = 500,mtry=m)
+  pred_rf[folds[[i]]] <- predict(rf,data=test)$predictions
+}
+
+prev_df <- (prev_df %>% mutate(pred_rf))[,c(1,2,3,4,6,5)]
+prev_df %>% summarize_all(~mean((.-observed)^2))
+
+#Comparing all MSE, we now know that random forest is the best in predicting players Value. To keep increase performance, we would have select a better tuning parameter using the caret package.
+```
+
