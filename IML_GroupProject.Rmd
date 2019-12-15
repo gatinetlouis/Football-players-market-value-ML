@@ -133,7 +133,7 @@ data = left_join(data,group_club,by=c('num_club'='url'))
 
 df_league = data %>% 
   group_by(league_name) %>% 
-  summarise(value=mean(`Value (in M€)`)) %>% 
+  summarise(value=mean(`Value (in M€)`,na.rm=T)) %>% 
   arrange(desc(value))
 
 
@@ -238,6 +238,29 @@ ggplot(data) +
 
 Looking at this histogram, we see that the distribution is skewed to the right, due to extreme positive outliers. The median stands at 0.675 meaning that **more than 50% of the players are valued at less than 5 million euros**.
 
+#### Distribution of the Players' value regarding the league
+
+```{r}
+df_medians = data %>% group_by(league_name) %>% summarise(median=quantile(log(`Value (in M€)`),c(0.5)))
+
+ggplot(data) + 
+  aes(log(`Value (in M€)`)) + 
+  geom_density(aes(fill = league_name, col = league_name),alpha=0.3) +
+  facet_grid(league_name~.) +
+  theme_bw() +
+  theme(axis.title=element_text(face="bold"))+
+  scale_color_discrete("League Names")+
+  scale_fill_discrete("League Names")+
+  scale_x_continuous('log of Value (in M€)')+
+  geom_vline(data=df_medians,aes(xintercept=median, col = league_name),alpha = 0.9)+
+  theme(strip.text = element_blank())
+
+```
+
+Looking at the density distribution of each league we have more insights : 
+- The German Bundesliga and the Italian Serie A have quite similar distributions skewed to the left
+- The English Premier League and the Spain Primera Division both have the highest median but the first one has a smoother distribution
+- The French Ligue 1 and the Portuguese Liga almost have the same median but the second one is more skewed to the right.
 
 #### Plot of the Value vs Wage
 
@@ -293,7 +316,7 @@ Let's dig deeper into the causes of that variance.
 
 #### Plot of the Value vs Age
 
-In the context of short term career in professionnal football, we wanted to ask how Age was linked with the Value of Players. So we group our dataset by Age and computed a percentage ratio to visualize this distribtion. Comparing Age and Value in a two-axis graph with boxplot for each Age give the following graph:
+In the context of short term career in professionnal football, we wanted to ask how Age was linked with the Value of Players. So we group our dataset by Age and computed a percentage ratio to visualize this distribution. Comparing Age and Value in a two-axis graph with boxplot for each Age gives the following graph:
 
 ```{r}
 dfgraph <- data %>% 
@@ -337,6 +360,7 @@ ggMarginal(plot_central, type="boxplot", col="darkblue")
 ```
 
 Statistics shows that medians are 25 for Age and 66 for Overall. We find again out outliers in the Overall Grade distribution, explained by the highly known and talented players (that are also the highest in Transfer Value). The smoothing line shows something interesting, there is at some point a decrease in the Overall Grade (starting after 30 years old). This depreciation of the grade is also represented in the transfer Value, even if minimum Overall grade tends to highly increase as long as Age is increasing (46 for the 'below-20', 57 for the 'above-40').
+
 
 ***
 
