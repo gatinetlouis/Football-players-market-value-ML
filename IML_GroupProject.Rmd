@@ -4,7 +4,7 @@ author: "A. Piguet - L. Gatinet - J. Guillot"
 output: html_document
 ---
 
-## Introduction:
+# Introduction:
 
 [FIFA 19](https://en.wikipedia.org/wiki/FIFA_19) is a football simulation video game developed by EA Vancouver as part of Electronic Arts' FIFA series. It is the 26^th^ installment in the FIFA series, and was released on 28 September 2018 for PlayStation 3, PlayStation 4, Xbox 360, Xbox One, Nintendo Switch, and Microsoft Windows. 
 
@@ -46,6 +46,8 @@ library(rpart)
 ```{r}
 data = read_csv("fifadata.csv")
 ```
+
+***
 
 # I-Data cleaning using dplyr:
 
@@ -133,7 +135,7 @@ data = left_join(data,group_club,by=c('num_club'='url'))
 
 df_league = data %>% 
   group_by(league_name) %>% 
-  summarise(value=mean(`Value (in M€)`,na.rm=T)) %>% 
+  summarise(value=mean(`Value (in M€)`)) %>% 
   arrange(desc(value))
 
 
@@ -162,6 +164,7 @@ for (i in 1:nrow(data)) {
 
 
 ##### Splitting the "Work Rate" column into its 2 components (Offensive / Defensive)
+
 ```{r}
 data = data %>% separate(`Work Rate`, c('Offensive Work Rate', 'Defensive Work Rate'), "/ ")
 
@@ -210,6 +213,7 @@ head(na_df)
 All remaining NA's are **players who have been loaned to another team (1264 players)** and **players for whom FIFA did not gather the information or was denied the access (300).**
 Considering that we have more than 15,000 rows and that players' for whom we have NA's do not follow a particular scheme (we are not removing any precious information), we decided to omit these observations.
 
+
 ```{r}
 rm(na_df)
 data = na.omit(data)
@@ -238,6 +242,7 @@ ggplot(data) +
 
 Looking at this histogram, we see that the distribution is skewed to the right, due to extreme positive outliers. The median stands at 0.675 meaning that **more than 50% of the players are valued at less than 5 million euros**.
 
+
 #### Distribution of the Players' value regarding the league
 
 ```{r}
@@ -261,6 +266,7 @@ Looking at the density distribution of each league we have more insights :
 - The German Bundesliga and the Italian Serie A have quite similar distributions skewed to the left
 - The English Premier League and the Spain Primera Division both have the highest median but the first one has a smoother distribution
 - The French Ligue 1 and the Portuguese Liga almost have the same median but the second one is more skewed to the right.
+
 
 #### Plot of the Value vs Wage
 
@@ -316,7 +322,7 @@ Let's dig deeper into the causes of that variance.
 
 #### Plot of the Value vs Age
 
-In the context of short term career in professionnal football, we wanted to ask how Age was linked with the Value of Players. So we group our dataset by Age and computed a percentage ratio to visualize this distribution. Comparing Age and Value in a two-axis graph with boxplot for each Age gives the following graph:
+In the context of short term career in professionnal football, we wanted to ask how Age was linked with the Value of Players. So we group our dataset by Age and computed a percentage ratio to visualize this distribtion. Comparing Age and Value in a two-axis graph with boxplot for each Age give the following graph:
 
 ```{r}
 dfgraph <- data %>% 
@@ -361,7 +367,6 @@ ggMarginal(plot_central, type="boxplot", col="darkblue")
 
 Statistics shows that medians are 25 for Age and 66 for Overall. We find again out outliers in the Overall Grade distribution, explained by the highly known and talented players (that are also the highest in Transfer Value). The smoothing line shows something interesting, there is at some point a decrease in the Overall Grade (starting after 30 years old). This depreciation of the grade is also represented in the transfer Value, even if minimum Overall grade tends to highly increase as long as Age is increasing (46 for the 'below-20', 57 for the 'above-40').
 
-
 ***
 
 # III-Regression models : Predict Value with inputs
@@ -392,14 +397,15 @@ corr <- cor(datacor)
 ggcorrplot(corr, method = "square", tl.cex=5, tl.srt=60)
 ```
 
-To avoid several unrelevant dummies in our analysis, we clear the dataset from some columns:
+To avoid several unrelevant variables and dummies in our analysis, we clear the dataset from some columns:
 -ID
 -Name
 -Nationality
 -Club
+-num_club
 
 ```{r}
-datareg <- data %>% select(-ID, -Name, -Nationality, -Club)
+datareg <- data %>% select(-ID, -Name, -Nationality, -Club, -num_club)
 ```
 
 For comparing the following machines, we will compute the **mean squared error** and each algorithm will be performed using a **20 times cross-validation**. 
@@ -424,6 +430,7 @@ for (i in 1:20){
 
 mean((pred_lm-datareg$`Value (in M€)`)^2)
 ```
+
 
 With a high MSE, and a large number of predictors (more than 50), we will now fit two penalized regression model, a ridge regression and a lasso regression
 
@@ -570,10 +577,6 @@ As we need only 1 variable as input in this model, we have decided to do a PCA a
 
 PCA methodology:
 
-#We take only the first PC to do kernel regression (it represents almost 90% of the total variance so we are satisfied)
-#Just to visualise the coefficient of each variable : it is difficult to interpret
-#We take only scores for each player of the first PC
-
 ```{r}
 datakernel = data.frame(Y = data$`Value (in M€)`, X)
 my.pca = princomp(datakernel[,-1])
@@ -622,17 +625,14 @@ The lowest MSE is incredibly high : the kernel model with PCA is not relevant fo
 The last family of machine that we will try is Trees and random forests. For the first one, we will try to find the optimal number of splits using the 20 times cross-validation. However, for the second one, we assume that the parameter *mtry* is set to default value 17 (i.e. the number of dimension divided by 3, rounded). With more computing power, we would have try to get a better tuning parameter *mtry*.
 
 ```{r}
-pred.tree = as.double(rep(NA,nrow(datareg)))
+pred.tree = rep(NA,nrow(datareg))
 
 cp_opt = rep (NA,20)
 for (i in 1:20) {
 train = datareg %>% slice(-folds[[i]])
 test = datareg %>% slice(folds[[i]])
 tree = rpart(`Value (in M€)`~., data=train)
-cp_opt [i] = tree$cptable %>% 
-          as.data.frame() %>% 
-          filter(xerror==min(xerror)) %>% 
-          select(CP) %>% as.numeric()
+cp_opt [i] = tree$cptable %>% as.data.frame() %>% filter(xerror==min(xerror)) %>% select(CP) %>% as.numeric()
 besttree = prune(tree,cp=cp_opt[i])
 pred.tree[folds[[i]]] = predict(besttree,newdata = test)
 }
@@ -669,8 +669,6 @@ prev_df = (prev_df %>% mutate(pred_rf))[,c(1,2,3,4,6,5)]
 prev_df %>% summarize_all(~mean((.-observed)^2))
 ```
 
-
 ## Conclusion: 
-
 
 Comparing all MSE, we now know that **Random Forest is the best machine in predicting players' Value in million euros**. To keep increase performance and under assumption that we have more computation power, we would select a better tuning parameter using the caret package.
